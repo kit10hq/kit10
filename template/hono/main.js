@@ -53,7 +53,7 @@ app.get('*', (c) => handler(c));
 
 const server = serve({
 	fetch: app.fetch,
-	port: 8787,
+	port: 0,
 });
 
 // graceful shutdown

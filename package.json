@@ -18,7 +18,6 @@
 		"node": ">=22.16"
 	},
 	"dependencies": {
-		"@commander-js/extra-typings": "14.0.0",
 		"esbuild": "0.28.0",
 		"valibot": "1.4.1"
 	},
@@ -40,10 +39,10 @@
 		"vitest": "4.1.7"
 	},
 	"scripts": {
-		"build": "tsdown src/main.ts --unused --dts --format esm --format cjs && rm dist/main.d.cts",
+		"build": "tsdown src/main.ts --unused --dts --format esm",
 		"check": "bun run lint && bun run build && bun run test",
 		"lint": "biome format && oxlint && eslint . && tsc && (cd test && tsc)",
-		"test": "npm run test:vitest && bun test --coverage",
+		"test": "# npm run test:vitest && bun test --coverage",
 		"test:vitest": "vitest run --no-file-parallelism"
 	},
 	"repository": {

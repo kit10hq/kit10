@@ -3,20 +3,18 @@
 import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { build, type Plugin } from 'esbuild';
-import * as options from './commander.js';
+import * as options from './options.js';
 import { getRoutes } from './router/file-tree.js';
 
-console.log(options);
-
 const routes = getRoutes(options.source_path);
-console.log(routes);
+// console.log(routes);
 
 const hono_app_routes = [];
-const DEST_PATH_STATIC = nodePath.join(options.output_path, 'static');
 
 const promises_cp = [];
 for (const route of routes) {
 	if (route.file.ext !== 'html') {
+		// oxlint-disable-next-line no-console
 		console.error(
 			`Unsupported file type "${route.file.ext}" for page file ${route.file.path}.`,
 		);
@@ -30,7 +28,10 @@ for (const route of routes) {
 	);
 
 	promises_cp.push(
-		fs.cp(route.file.path, nodePath.join(DEST_PATH_STATIC, file_path)),
+		fs.cp(
+			route.file.path,
+			nodePath.join(options.output_static_path, file_path),
+		),
 	);
 }
 
@@ -50,7 +51,9 @@ await Promise.all(promises_cp);
 {
 	const PATH_MAIN = nodePath.join(options.output_path, 'main.js');
 	let contents = await fs.readFile(PATH_MAIN, 'utf8');
-	contents = contents.replace('// MARK: app', hono_app_routes.join('\n'));
+	contents = contents
+		.replace('// MARK: app', hono_app_routes.join('\n'))
+		.replace('port: 0,', `port: ${options.config.server?.port ?? 11920},`);
 	await fs.writeFile(PATH_MAIN, contents, 'utf8');
 }
 
