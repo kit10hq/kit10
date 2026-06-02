@@ -1,6 +1,8 @@
-import fs from 'node:fs/promises';
+// import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import * as v from 'valibot';
+
+export const is_prod = process.argv[2] === 'build';
 
 const configModule = await import(
 	nodePath.join(process.cwd(), 'kit10.config.js')

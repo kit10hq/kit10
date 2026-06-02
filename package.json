@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"esbuild": "0.28.0",
+		"html-rewriter-wasm": "0.4.1",
 		"valibot": "1.4.1"
 	},
 	"optionalDependencies": {
