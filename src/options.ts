@@ -1,6 +1,7 @@
 // import fs from 'node:fs/promises';
 import nodePath from 'node:path';
-import * as v from 'valibot';
+// import * as v from 'valibot';
+import type { Plugin } from './build/plugins.js';
 
 export const is_prod = process.argv[2] === 'build';
 
@@ -8,15 +9,21 @@ const configModule = await import(
 	nodePath.join(process.cwd(), 'kit10.config.js')
 );
 
-const configSchema = v.object({
-	server: v.optional(
-		v.object({
-			port: v.optional(v.number()),
-		}),
-	),
-});
-export type Config = v.InferOutput<typeof configSchema>;
-export const config = v.parse(configSchema, configModule.default);
+// const configSchema = v.object({
+// 	server: v.optional(
+// 		v.object({
+// 			port: v.optional(v.number()),
+// 		}),
+// 	),
+// });
+// export type Config = v.InferOutput<typeof configSchema>;
+export type Config = {
+	server?: {
+		port?: number;
+	};
+	plugins?: Plugin[];
+};
+export const config = configModule.default as Config;
 
 export const source_path = nodePath.join(process.cwd(), 'src');
 

@@ -4,46 +4,53 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import * as env from '../env.js';
 import * as options from '../options.js';
+import {
+	type Artifact,
+	artifact_collections,
+	createArtifact,
+} from './artifact.js';
+import {
+	htmlScanImportsPlugin,
+	htmlWriteImportsPlugin,
+} from './plugins/html/imports.js';
+import { htmlTemplatePlugin } from './plugins/html/template.js';
+import { applyPlugins } from './plugins.js';
 import { getRoutes } from './router/file-tree.js';
-import { TempFile } from './temp-file.js';
 
-export const app_routes: string[] = [];
+/** A map of routes to their corresponding Artifact instances. */
+export const app_routes = new Map<string, Artifact>();
 
 /**
  * Returns a list of TempFile instances for the app entrypoints.
  * @returns -
  */
-export function getEntrypoints(): Promise<TempFile[]> {
+export async function parseEntrypoints(): Promise<void> {
 	const routes_data = getRoutes(options.source_path);
 	// console.log(routes);
 
-	const tempFile_promises = [];
+	const promises = [];
 	for (const route_data of routes_data) {
-		if (route_data.file.ext !== 'html') {
-			// oxlint-disable-next-line no-console
-			console.error(
-				`Unsupported file type "${route_data.file.ext}" for page file ${route_data.file.path}.`,
-			);
-			process.exit(1);
-		}
-
 		const static_path = nodePath.relative(
 			options.source_path,
 			route_data.file.path,
 		);
+		const artifact = createArtifact(static_path);
+		if (artifact.ext === 'html') {
+			artifact_collections.html.add(artifact);
+		} else {
+			artifact_collections.pre_html.add(artifact);
+		}
 
-		app_routes.push(
-			`app.get('${route_data.route}', (c) => handler(c, '${static_path}'));`,
-		);
+		app_routes.set(route_data.route, artifact);
 
-		tempFile_promises.push(TempFile.load(static_path));
+		promises.push(artifact.load());
 	}
 
-	return Promise.all(tempFile_promises);
+	await Promise.all(promises);
 }
 
 /** Writes router files to the output directory. */
-export async function writeRouter() {
+export async function flushRouter() {
 	// copy template directory as dist
 	await fs.cp(env.kit10_template_path, options.output_path, {
 		recursive: true,
@@ -51,10 +58,17 @@ export async function writeRouter() {
 
 	// update main.js with app routes
 	{
+		const app_routes_js = [];
+		for (const [route, artifact] of app_routes.entries()) {
+			app_routes_js.push(
+				`app.get('${route}', (c) => handler(c, '${artifact.path}'));`,
+			);
+		}
+
 		const PATH_MAIN = nodePath.join(options.output_path, 'main.js');
 		let contents = await fs.readFile(PATH_MAIN, 'utf8');
 		contents = contents
-			.replace('// MARK: app', app_routes.join('\n'))
+			.replace('// MARK: app', app_routes_js.join('\n'))
 			.replace('port: 0,', `port: ${options.config.server?.port ?? 3000},`);
 		await fs.writeFile(PATH_MAIN, contents, 'utf8');
 	}

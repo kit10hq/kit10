@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!**/dist/**"]
+		"includes": ["**", "!**/dist/**", "!**/*.html", "!**/*.ejs", "!**/*.vue"]
 	},
 	"formatter": {
 		"enabled": true,

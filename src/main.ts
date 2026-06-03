@@ -14,3 +14,6 @@ if (command === 'dev' || command === 'build') {
 	console.error(`Unknown command "${command}".`);
 	process.exit(1);
 }
+
+export type { Plugin } from './build/plugins.js';
+export type { Config } from './options.js';
