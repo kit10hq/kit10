@@ -41,13 +41,13 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/kirick-ts/kit10.git"
+		"url": "git+https://github.com/kit10hq/kit10.git"
 	},
 	"keywords": [],
 	"author": "Daniil Kirichenko (https://twitter.com/kirickme)",
 	"license": "MIT",
 	"bugs": {
-		"url": "https://github.com/kirick-ts/kit10/issues"
+		"url": "https://github.com/kit10hq/kit10/issues"
 	},
-	"homepage": "https://github.com/kirick-ts/kit10#readme"
+	"homepage": "https://github.com/kit10hq/kit10#readme"
 }
