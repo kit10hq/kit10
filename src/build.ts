@@ -1,11 +1,6 @@
 // oxlint-disable unicorn/no-process-exit
 
-import {
-	artifact_collections,
-	artifacts,
-	flushArtifacts,
-	printArtifacts,
-} from './build/artifact.js';
+import * as artifacts from './build/artifact.js';
 import { bundle } from './build/bundler.js';
 import { gzipPlugin } from './build/plugins/gzip.js';
 import {
@@ -13,7 +8,7 @@ import {
 	htmlWriteImportsPlugin,
 } from './build/plugins/html/imports.js';
 import { minifyHtmlPlugin } from './build/plugins/html/minify.js';
-import { htmlTemplatePlugin } from './build/plugins/html/template.js';
+// import { htmlTemplatePlugin } from './build/plugins/html/template.js';
 import { applyPlugins } from './build/plugins.js';
 import { flushRouter, parseEntrypoints } from './build/router.js';
 import * as buildOptions from './options.js';
@@ -24,10 +19,10 @@ const start = process.hrtime.bigint();
 await parseEntrypoints();
 
 // compile all artifacts to HTML by plugins
-await applyPlugins(artifact_collections.pre_html, buildOptions.config.plugins);
+await applyPlugins(artifacts.collections.pre_html, buildOptions.config.plugins);
 
 // check all entrypoint artifacts have been compiled to HTML
-for (const artifact of artifact_collections.pre_html) {
+for (const artifact of artifacts.collections.pre_html) {
 	if (artifact.ext !== 'html') {
 		// oxlint-disable-next-line no-console
 		console.error(
@@ -36,34 +31,34 @@ for (const artifact of artifact_collections.pre_html) {
 		process.exit(1);
 	}
 
-	artifact_collections.html.add(artifact);
+	artifacts.collections.html.add(artifact);
 }
 
-artifact_collections.pre_html.clear();
+artifacts.collections.pre_html.clear();
 
-await applyPlugins(artifact_collections.html.values(), [
-	htmlTemplatePlugin,
+await applyPlugins(artifacts.collections.html.values(), [
+	// htmlTemplatePlugin,
 	htmlScanImportsPlugin,
 ]);
 
 await bundle();
 
 await applyPlugins(
-	artifact_collections.bundler.values(),
+	artifacts.collections.bundler.values(),
 	buildOptions.config.plugins,
 );
 
-await applyPlugins(artifact_collections.html.values(), [
+await applyPlugins(artifacts.collections.html.values(), [
 	htmlWriteImportsPlugin,
 	minifyHtmlPlugin,
 ]);
 
-await applyPlugins(artifacts.values(), [gzipPlugin]);
+await applyPlugins(artifacts.all.values(), [gzipPlugin]);
 
-printArtifacts();
+artifacts.print();
 
 await flushRouter();
-await flushArtifacts();
+await artifacts.flush();
 
 /**
  * Format nanoseconds as a human-readable string.

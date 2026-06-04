@@ -4,11 +4,8 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import * as env from '../env.js';
 import * as options from '../options.js';
-import {
-	type Artifact,
-	artifact_collections,
-	createArtifact,
-} from './artifact.js';
+import type { Artifact } from './artifact.js';
+import * as artifacts from './artifact.js';
 import { getRoutes } from './router/file-tree.js';
 
 /** A map of routes to their corresponding Artifact instances. */
@@ -28,11 +25,11 @@ export async function parseEntrypoints(): Promise<void> {
 			options.source_path,
 			route_data.file.path,
 		);
-		const artifact = createArtifact(static_path);
+		const artifact = artifacts.create(static_path);
 		if (artifact.ext === 'html') {
-			artifact_collections.html.add(artifact);
+			artifacts.collections.html.add(artifact);
 		} else {
-			artifact_collections.pre_html.add(artifact);
+			artifacts.collections.pre_html.add(artifact);
 		}
 
 		app_routes.set(route_data.route, artifact);

@@ -7,8 +7,6 @@ type ArtifactOptions = {
 declare class Artifact {
   #private;
   readonly id: string;
-  dependents: Set<Artifact>;
-  dependencies: Set<Artifact>;
   readonly meta: Record<string, unknown>;
   constructor(symbol: symbol, arg0: string | Artifact, options?: ArtifactOptions);
   get path(): string;
@@ -30,6 +28,8 @@ declare class Artifact {
   update(content: ArtifactContent): void;
   /** Appends content to the temporary file. */
   append(content: string): void;
+  /** Links this artifact to another artifact. */
+  link(artifact: Artifact): void;
   /** Deletes the temporary file. */
   delete(): void;
   /** Creates dependency artifact. */
@@ -43,8 +43,10 @@ type Promisable<T> = T | Promise<T>;
 type Plugin = {
   filter: "*" | RegExp;
   transform: (artifact: Artifact, options: {
+    source_path: string;
     is_prod: boolean;
   }) => Promisable<void>;
+  end?: () => Promisable<void>;
 };
 //#endregion
 //#region src/options.d.ts

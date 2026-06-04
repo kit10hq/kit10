@@ -10,8 +10,8 @@ type ArtifactOptions = {
 	keep_name?: boolean;
 };
 
-export const artifacts: Map<string, Artifact> = new Map<string, Artifact>();
-export const artifact_collections: {
+export const all: Map<string, Artifact> = new Map<string, Artifact>();
+export const collections: {
 	pre_html: Set<Artifact>;
 	html: Set<Artifact>;
 	bundler: Set<Artifact>;
@@ -20,8 +20,39 @@ export const artifact_collections: {
 	html: new Set<Artifact>(),
 	bundler: new Set<Artifact>(),
 };
+
+export const dependencies: Map<Artifact, Set<Artifact>> = new Map<
+	Artifact,
+	Set<Artifact>
+>();
+
+const dependents: Map<Artifact, Set<Artifact>> = new Map<
+	Artifact,
+	Set<Artifact>
+>();
+
+/**
+ * Links parent artifact to child artifact in dependencies map.
+ * @param parent Key artifact.
+ * @param child Value artifact.
+ */
+function link(parent: Artifact, child: Artifact): void {
+	if (!dependencies.has(parent)) {
+		dependencies.set(parent, new Set<Artifact>());
+	}
+
+	dependencies.get(parent)!.add(child);
+
+	if (!dependents.has(child)) {
+		dependents.set(child, new Set<Artifact>());
+	}
+
+	dependents.get(child)!.add(parent);
+}
+
 const directories = new Set<string>();
 const mkdir_promises: Promise<unknown>[] = [];
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -31,8 +62,6 @@ export class Artifact {
 	readonly id: string = createId();
 	#path: string;
 	#content: ArtifactContent | null = null;
-	dependents: Set<Artifact> = new Set<Artifact>();
-	dependencies: Set<Artifact> = new Set<Artifact>();
 	readonly meta: Record<string, unknown> = {};
 
 	constructor(
@@ -57,8 +86,7 @@ export class Artifact {
 
 			this.#path = path;
 		} else {
-			arg0.dependencies.add(this);
-			this.dependents.add(arg0);
+			link(arg0, this);
 
 			if (options!.keep_name) {
 				this.#path = arg0.path + '.' + options!.ext;
@@ -70,7 +98,7 @@ export class Artifact {
 			}
 		}
 
-		artifacts.set(this.#path, this);
+		all.set(this.#path, this);
 
 		const dir = nodePath.dirname(
 			nodePath.join(buildOptions.output_static_path, this.#path),
@@ -99,9 +127,9 @@ export class Artifact {
 
 	/** Updates the file extension. */
 	updateExt(ext: string): void {
-		artifacts.delete(this.#path);
+		all.delete(this.#path);
 		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
-		artifacts.set(this.#path, this);
+		all.set(this.#path, this);
 	}
 
 	get is_loaded(): boolean {
@@ -178,20 +206,33 @@ export class Artifact {
 		this.#content = (this.#content ?? '') + content;
 	}
 
+	/** Links this artifact to another artifact. */
+	link(artifact: Artifact): void {
+		link(this, artifact);
+	}
+
 	/** Deletes the temporary file. */
 	delete(): void {
 		this.#content = null;
-		artifacts.delete(this.path);
 
-		for (const artifact of this.dependents) {
-			artifact.dependencies.delete(this);
+		const artifact_dependents = dependents.get(this);
+		if (artifact_dependents) {
+			for (const artifact of artifact_dependents) {
+				dependencies.get(artifact)?.delete(this);
+			}
 		}
 
-		this.dependents.clear();
-
-		for (const artifact of this.dependencies) {
-			artifact.delete();
+		const artifact_dependencies = dependencies.get(this);
+		if (artifact_dependencies) {
+			for (const artifact of artifact_dependencies) {
+				artifact.delete();
+			}
 		}
+
+		dependents.delete(this);
+		dependencies.delete(this);
+
+		all.delete(this.path);
 	}
 
 	/** Creates dependency artifact. */
@@ -213,7 +254,7 @@ export class Artifact {
  * @param path - The path to check.
  */
 export function isArtifactAt(path: string): boolean {
-	return typeof artifacts.get(path)?.text() === 'string';
+	return typeof all.get(path)?.text() === 'string';
 }
 
 /**
@@ -221,8 +262,8 @@ export function isArtifactAt(path: string): boolean {
  * @param path - The path of the artifact.
  * @returns -
  */
-export function createArtifact(path: string): Artifact {
-	let artifact = artifacts.get(path);
+export function create(path: string): Artifact {
+	let artifact = all.get(path);
 	if (artifact === undefined) {
 		artifact = new Artifact(SYMBOL, path);
 	}
@@ -231,13 +272,16 @@ export function createArtifact(path: string): Artifact {
 }
 
 /** Logs artifacts. */
-export function printArtifacts(): void {
+export function print(): void {
 	// oxlint-disable-next-line no-console
-	console.log(`${artifacts.size} artifacts:`);
+	console.log(`${all.size} artifacts:`);
 
 	const info = [];
-	for (const artifact of artifacts.values()) {
-		// console.info(info);
+	for (const artifact of all.values()) {
+		if (artifact.meta.noout === true) {
+			continue;
+		}
+
 		info.push({
 			filename: artifact.path,
 			size: String(
@@ -256,11 +300,15 @@ export function printArtifacts(): void {
 }
 
 /** Writes all temporary files to disk. */
-export async function flushArtifacts(): Promise<void> {
+export async function flush(): Promise<void> {
 	await Promise.all(mkdir_promises);
 
 	const promises = [];
-	for (const artifact of artifacts.values()) {
+	for (const artifact of all.values()) {
+		if (artifact.meta.noout === true) {
+			continue;
+		}
+
 		const output_file_path = nodePath.join(
 			buildOptions.output_static_path,
 			artifact.path,

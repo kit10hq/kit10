@@ -14,7 +14,7 @@
       },
       "devDependencies": {
         "@biomejs/biome": "2.4.10",
-        "@kirick/lint": "0.3.1",
+        "@kirick/lint": "0.3.2",
         "@types/node": "22.15.13",
         "eslint": "10.2.0",
         "oxlint": "1.58.0",
@@ -156,7 +156,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@kirick/lint": ["@kirick/lint@0.3.1", "", { "dependencies": { "@stylistic/eslint-plugin": "5.10.0", "eslint": "10.2.0", "eslint-plugin-jsdoc": "62.9.0", "eslint-plugin-n": "17.24.0", "eslint-plugin-promise": "7.2.1", "eslint-plugin-unicorn": "64.0.0", "eslint-plugin-vue": "10.8.0", "typescript-eslint": "8.58.0" }, "bin": { "lint": "dist/main.mjs" } }, "sha512-NoH3VVby7x/mtHtSoA18ECJVtYcmm8P8d5PHUsxq9gXzxiiaQJa2FrTKVODyHlc3gaWc5wBdZgCKtKrDEL0LZg=="],
+    "@kirick/lint": ["@kirick/lint@0.3.2", "", { "dependencies": { "@stylistic/eslint-plugin": "5.10.0", "eslint": "10.2.0", "eslint-plugin-jsdoc": "62.9.0", "eslint-plugin-n": "17.24.0", "eslint-plugin-promise": "7.2.1", "eslint-plugin-unicorn": "64.0.0", "eslint-plugin-vue": "10.8.0", "typescript-eslint": "8.58.0" }, "bin": { "lint": "dist/main.mjs" } }, "sha512-WKEJYYaK/YsTuKZ0TrlBV9eLt2OersmAsQ9rrKRbixLkpNxqt1EH5Ps3JM8ap8W7O2Rd2f/JZZZKqJbeqyK+1g=="],
 
     "@minify-html/node": ["@minify-html/node@0.18.1", "", { "optionalDependencies": { "@minify-html/node-darwin-arm64": "0.18.1", "@minify-html/node-darwin-x64": "0.18.1", "@minify-html/node-linux-arm64": "0.18.1", "@minify-html/node-linux-x64": "0.18.1", "@minify-html/node-win32-x64": "0.18.1" }, "bin": { "minify-html": "cli.js" } }, "sha512-pNOv6z9zUDrjTU1+VcPOnDzGeaaqd6m9kbyHU+sg9O35450uzfke8ahx8gKlFdp/kQFrRn2rFIGAoANUZ62nSw=="],
 

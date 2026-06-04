@@ -6,7 +6,6 @@ const targets = browserslistToTargets(browserslist(">= 0.25%"));
 const cssPlugin = {
 	filter: /\.css$/u,
 	transform(artifact, options) {
-		console.log("cssPlugin", artifact.path);
 		if (options.is_prod) artifact.update(transform({
 			filename: artifact.path,
 			code: artifact.buffer(),

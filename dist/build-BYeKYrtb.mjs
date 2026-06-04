@@ -1,4 +1,4 @@
-import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-CQtPneOe.mjs";
+import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-C9TSuTfd.mjs";
 import nodePath from "node:path";
 import fs from "node:fs/promises";
 import { customAlphabet } from "nanoid";
@@ -20,20 +20,40 @@ async function applyPlugins(artifacts, plugins) {
 	for (const plugin of plugins) {
 		const promises = [];
 		for (const artifact of artifacts_set) if (plugin.filter === "*" || plugin.filter.test(artifact.path)) {
-			const result = plugin.transform(artifact, { is_prod });
+			const result = plugin.transform(artifact, {
+				source_path,
+				is_prod
+			});
 			if (result instanceof Promise) promises.push(result);
 		}
 		if (promises.length > 0) await Promise.all(promises);
+		if (plugin.end) {
+			const result = plugin.end();
+			if (result instanceof Promise) await result;
+		}
 	}
 }
 //#endregion
 //#region src/build/artifact.ts
-const artifacts = /* @__PURE__ */ new Map();
-const artifact_collections = {
+const all = /* @__PURE__ */ new Map();
+const collections = {
 	pre_html: /* @__PURE__ */ new Set(),
 	html: /* @__PURE__ */ new Set(),
 	bundler: /* @__PURE__ */ new Set()
 };
+const dependencies = /* @__PURE__ */ new Map();
+const dependents = /* @__PURE__ */ new Map();
+/**
+* Links parent artifact to child artifact in dependencies map.
+* @param parent Key artifact.
+* @param child Value artifact.
+*/
+function link(parent, child) {
+	if (!dependencies.has(parent)) dependencies.set(parent, /* @__PURE__ */ new Set());
+	dependencies.get(parent).add(child);
+	if (!dependents.has(child)) dependents.set(child, /* @__PURE__ */ new Set());
+	dependents.get(child).add(parent);
+}
 const directories = /* @__PURE__ */ new Set();
 const mkdir_promises = [];
 const textEncoder$1 = new TextEncoder();
@@ -43,8 +63,6 @@ var Artifact = class Artifact {
 	id = createId();
 	#path;
 	#content = null;
-	dependents = /* @__PURE__ */ new Set();
-	dependencies = /* @__PURE__ */ new Set();
 	meta = {};
 	constructor(symbol, arg0, options) {
 		if (symbol !== SYMBOL) throw new Error("Artifact constructor is private, use createArtifact() instead.");
@@ -56,15 +74,14 @@ var Artifact = class Artifact {
 			}
 			this.#path = path;
 		} else {
-			arg0.dependencies.add(this);
-			this.dependents.add(arg0);
+			link(arg0, this);
 			if (options.keep_name) this.#path = arg0.path + "." + options.ext;
 			else {
 				this.#path = arg0.path.includes(nodePath.sep) ? nodePath.dirname(arg0.path) + "/" : "";
 				this.#path += `${this.id}.${options.ext}`;
 			}
 		}
-		artifacts.set(this.#path, this);
+		all.set(this.#path, this);
 		const dir = nodePath.dirname(nodePath.join(output_static_path, this.#path));
 		if (!directories.has(dir)) {
 			directories.add(dir);
@@ -85,9 +102,9 @@ var Artifact = class Artifact {
 	}
 	/** Updates the file extension. */
 	updateExt(ext) {
-		artifacts.delete(this.#path);
+		all.delete(this.#path);
 		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
-		artifacts.set(this.#path, this);
+		all.set(this.#path, this);
 	}
 	get is_loaded() {
 		return this.#content !== null;
@@ -124,13 +141,20 @@ var Artifact = class Artifact {
 		if (typeof this.#content !== "string") throw new TypeError(`Cannot append to artifact "${this.path}" with buffer content inside.`);
 		this.#content = (this.#content ?? "") + content;
 	}
+	/** Links this artifact to another artifact. */
+	link(artifact) {
+		link(this, artifact);
+	}
 	/** Deletes the temporary file. */
 	delete() {
 		this.#content = null;
-		artifacts.delete(this.path);
-		for (const artifact of this.dependents) artifact.dependencies.delete(this);
-		this.dependents.clear();
-		for (const artifact of this.dependencies) artifact.delete();
+		const artifact_dependents = dependents.get(this);
+		if (artifact_dependents) for (const artifact of artifact_dependents) dependencies.get(artifact)?.delete(this);
+		const artifact_dependencies = dependencies.get(this);
+		if (artifact_dependencies) for (const artifact of artifact_dependencies) artifact.delete();
+		dependents.delete(this);
+		dependencies.delete(this);
+		all.delete(this.path);
 	}
 	/** Creates dependency artifact. */
 	create(content, options) {
@@ -148,33 +172,37 @@ var Artifact = class Artifact {
 * @param path - The path to check.
 */
 function isArtifactAt(path) {
-	return typeof artifacts.get(path)?.text() === "string";
+	return typeof all.get(path)?.text() === "string";
 }
 /**
 * Creates or retrieves an Artifact for the given path.
 * @param path - The path of the artifact.
 * @returns -
 */
-function createArtifact(path) {
-	let artifact = artifacts.get(path);
+function create(path) {
+	let artifact = all.get(path);
 	if (artifact === void 0) artifact = new Artifact(SYMBOL, path);
 	return artifact;
 }
 /** Logs artifacts. */
-function printArtifacts() {
-	console.log(`${artifacts.size} artifacts:`);
+function print() {
+	console.log(`${all.size} artifacts:`);
 	const info = [];
-	for (const artifact of artifacts.values()) info.push({
-		filename: artifact.path,
-		size: String(artifact.type === "text" ? artifact.text().length : artifact.type === "binary" ? artifact.buffer().length : "?").padStart(6)
-	});
+	for (const artifact of all.values()) {
+		if (artifact.meta.noout === true) continue;
+		info.push({
+			filename: artifact.path,
+			size: String(artifact.type === "text" ? artifact.text().length : artifact.type === "binary" ? artifact.buffer().length : "?").padStart(6)
+		});
+	}
 	console.table(info.toSorted((a, b) => a.filename.localeCompare(b.filename)));
 }
 /** Writes all temporary files to disk. */
-async function flushArtifacts() {
+async function flush() {
 	await Promise.all(mkdir_promises);
 	const promises = [];
-	for (const artifact of artifacts.values()) {
+	for (const artifact of all.values()) {
+		if (artifact.meta.noout === true) continue;
 		const output_file_path = nodePath.join(output_static_path, artifact.path);
 		let promise;
 		if (artifact.is_loaded) promise = fs.writeFile(output_file_path, artifact.buffer());
@@ -203,7 +231,7 @@ const esbuildPlugin = {
 			namespace: "artifact"
 		}, (args) => {
 			return {
-				contents: args.path === SENTINEL_PATH ? "export default null;" : createArtifact(args.path).text(),
+				contents: args.path === SENTINEL_PATH ? "export default null;" : create(args.path).text(),
 				loader: "ts",
 				resolveDir: nodePath.dirname(args.path)
 			};
@@ -221,7 +249,7 @@ const esbuildPlugin = {
 		build.onLoad({ filter: /.*/ }, async (args) => {
 			const ext = args.path.slice(args.path.lastIndexOf("."));
 			if (!known_exts.has(ext) && args.path.startsWith(source_path)) {
-				const artifact = createArtifact(args.path);
+				const artifact = create(args.path);
 				if (args.namespace !== "artifact") tempArtifacts.add(artifact);
 				if (!artifact.is_loaded) await artifact.load();
 				await applyPlugins([artifact], config.plugins);
@@ -244,7 +272,7 @@ const esbuildPlugin = {
 /** Runs JS/TS bundling */
 async function bundle() {
 	const paths = [];
-	for (const artifact of artifact_collections.bundler) paths.push(artifact.path);
+	for (const artifact of collections.bundler) paths.push(artifact.path);
 	const result = await esbuild.build({
 		absWorkingDir: source_path,
 		plugins: [esbuildPlugin],
@@ -265,9 +293,9 @@ async function bundle() {
 	for (const output of result.outputFiles) {
 		const static_path = output.path.slice(1);
 		if (static_path !== SENTINEL_PATH) {
-			const artifact = createArtifact(static_path);
+			const artifact = create(static_path);
 			artifact.update(output.text);
-			artifact_collections.bundler.add(artifact);
+			collections.bundler.add(artifact);
 		}
 	}
 }
@@ -289,14 +317,18 @@ const gzipPlugin = {
 };
 //#endregion
 //#region src/build/plugins/html/imports.ts
+const HEAD_PLACEHOLDER = `<!--${createId()}-->`;
+const PAGE_PLACEHOLDER = `<!--${createId()}-->`;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const html_inline_threshold = config.build?.html_inline_threshold ?? 2e3;
+let template_html_start;
+let template_html_end;
 const htmlScanImportsPlugin = {
 	filter: "*",
 	async transform(artifact) {
 		const scriptSrcArtifact = artifact.create("", { ext: "js" });
-		scriptSrcArtifact.meta.html_type = "script";
+		scriptSrcArtifact.meta.html_type = "head";
 		let result = "";
 		const rewriter = new HTMLRewriter((chunk) => {
 			result += textDecoder.decode(chunk);
@@ -311,13 +343,16 @@ const htmlScanImportsPlugin = {
 				if (node.text) tag_content += node.text;
 			}
 		});
+		rewriter.on("kit10\\:page", { element(element) {
+			element.replace(PAGE_PLACEHOLDER, { html: true });
+		} });
 		rewriter.on("script", { element(element) {
 			if (element.getAttribute("type") === "module") {
 				const attr_src = element.getAttribute("src");
 				if (attr_src === null) {
 					const scriptArtifact = artifact.create("", { ext: "js" });
 					scriptArtifact.meta.html_type = "script";
-					artifact_collections.bundler.add(scriptArtifact);
+					collections.bundler.add(scriptArtifact);
 					element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 					element.onEndTag(() => {
 						scriptArtifact.update(tag_content);
@@ -341,25 +376,24 @@ const htmlScanImportsPlugin = {
 			if (element.getAttribute("rel") === "stylesheet" || element.getAttribute("rel") === "preload" && element.getAttribute("as") === "style") {
 				const path = element.getAttribute("href");
 				if (path !== null) {
-					const linkArtifact = createArtifact(nodePath.join(nodePath.dirname(artifact.path), path));
+					const linkArtifact = create(nodePath.join(nodePath.dirname(artifact.path), path));
 					linkArtifact.meta.html_type = "link";
-					artifact.dependencies.add(linkArtifact);
+					artifact.link(linkArtifact);
 					promises.push(linkArtifact.load().then(() => linkArtifact.process()));
 					element.setAttribute("href", linkArtifact.id);
 				}
 			}
 		} });
 		rewriter.on("head", { element(element) {
-			element.append(`<!--${scriptSrcArtifact.id}-->`, { html: true });
+			console.log("head element", artifact.path);
+			element.append(HEAD_PLACEHOLDER, { html: true });
 		} });
 		rewriter.write(textEncoder.encode(artifact.text()));
 		rewriter.end();
-		if (scriptSrcArtifact.text().length > 0) artifact_collections.bundler.add(scriptSrcArtifact);
-		else {
-			result = result.replace(`<!--${scriptSrcArtifact.id}-->`, "");
-			scriptSrcArtifact.delete();
-		}
-		artifact.update(result);
+		if (scriptSrcArtifact.text().length > 0) collections.bundler.add(scriptSrcArtifact);
+		else scriptSrcArtifact.delete();
+		artifact.update((template_html_start ?? "") + result + (template_html_end ?? ""));
+		if (artifact.is_page) for (const artifactDependency of dependencies.get(templateArtifact) ?? []) artifact.link(artifactDependency);
 		await Promise.all(promises);
 	}
 };
@@ -367,7 +401,19 @@ const htmlWriteImportsPlugin = {
 	filter: "*",
 	transform(artifact) {
 		let content = artifact.text();
-		for (const artifactDependency of artifact.dependencies) switch (artifactDependency.meta.html_type) {
+		let head_content = "";
+		for (const artifactDependency of dependencies.get(artifact) ?? []) switch (artifactDependency.meta.html_type) {
+			case "head": {
+				const script_content = artifactDependency.text();
+				let html;
+				if (script_content.length > html_inline_threshold) html = `<script type="module" src="/${artifactDependency.path}"><\/script>`;
+				else {
+					html = `<script type="module">\n${script_content}<\/script>`;
+					artifactDependency.delete();
+				}
+				head_content += html + "\n";
+				break;
+			}
 			case "script": {
 				const script_content = artifactDependency.text();
 				let html;
@@ -384,13 +430,18 @@ const htmlWriteImportsPlugin = {
 				artifactDependency.delete();
 				break;
 			case "link":
-				console.log("link found", artifactDependency.id, artifactDependency.path);
 				content = content.replaceAll(artifactDependency.id, "/" + artifactDependency.path);
 				break;
 		}
+		content = content.replaceAll(HEAD_PLACEHOLDER, head_content);
 		artifact.update(content);
 	}
 };
+const templateArtifact = create("+template.html");
+templateArtifact.meta.noout = true;
+await templateArtifact.load();
+await applyPlugins([templateArtifact], [htmlScanImportsPlugin]);
+[template_html_start, template_html_end] = templateArtifact.text().split(PAGE_PLACEHOLDER);
 //#endregion
 //#region src/build/plugins/html/minify.ts
 const MINIFY_HTML_OPTIONS = {
@@ -418,15 +469,6 @@ const minifyHtmlPlugin = {
 			const html_minified = minify(Buffer.from(html), MINIFY_HTML_OPTIONS).toString("utf8");
 			artifact.update(html_minified);
 		}
-	}
-};
-//#endregion
-//#region src/build/plugins/html/template.ts
-const page_template = await fs.readFile(nodePath.join(source_path, "+template.html"), "utf8");
-const htmlTemplatePlugin = {
-	filter: "*",
-	transform(artifact) {
-		artifact.update(page_template.replace("<kit10:page></kit10:page>", artifact.text()));
 	}
 };
 //#endregion
@@ -612,9 +654,9 @@ async function parseEntrypoints() {
 	const routes_data = getRoutes(source_path);
 	const promises = [];
 	for (const route_data of routes_data) {
-		const artifact = createArtifact(nodePath.relative(source_path, route_data.file.path));
-		if (artifact.ext === "html") artifact_collections.html.add(artifact);
-		else artifact_collections.pre_html.add(artifact);
+		const artifact = create(nodePath.relative(source_path, route_data.file.path));
+		if (artifact.ext === "html") collections.html.add(artifact);
+		else collections.pre_html.add(artifact);
 		app_routes.set(route_data.route, artifact);
 		promises.push(artifact.load());
 	}
@@ -636,23 +678,23 @@ async function flushRouter() {
 //#region src/build.ts
 const start = process.hrtime.bigint();
 await parseEntrypoints();
-await applyPlugins(artifact_collections.pre_html, config.plugins);
-for (const artifact of artifact_collections.pre_html) {
+await applyPlugins(collections.pre_html, config.plugins);
+for (const artifact of collections.pre_html) {
 	if (artifact.ext !== "html") {
 		console.error(`No plugin found for ".${artifact.ext}" pages (for "${artifact.path}").`);
 		process.exit(1);
 	}
-	artifact_collections.html.add(artifact);
+	collections.html.add(artifact);
 }
-artifact_collections.pre_html.clear();
-await applyPlugins(artifact_collections.html.values(), [htmlTemplatePlugin, htmlScanImportsPlugin]);
+collections.pre_html.clear();
+await applyPlugins(collections.html.values(), [htmlScanImportsPlugin]);
 await bundle();
-await applyPlugins(artifact_collections.bundler.values(), config.plugins);
-await applyPlugins(artifact_collections.html.values(), [htmlWriteImportsPlugin, minifyHtmlPlugin]);
-await applyPlugins(artifacts.values(), [gzipPlugin]);
-printArtifacts();
+await applyPlugins(collections.bundler.values(), config.plugins);
+await applyPlugins(collections.html.values(), [htmlWriteImportsPlugin, minifyHtmlPlugin]);
+await applyPlugins(all.values(), [gzipPlugin]);
+print();
 await flushRouter();
-await flushArtifacts();
+await flush();
 /**
 * Format nanoseconds as a human-readable string.
 * @param nanoseconds - The number of nanoseconds to format.

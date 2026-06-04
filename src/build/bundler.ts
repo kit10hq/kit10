@@ -4,12 +4,8 @@ import nodePath from 'node:path';
 import * as esbuild from 'esbuild';
 import * as options from '../options.js';
 import { createId } from '../utils.js';
-import {
-	type Artifact,
-	artifact_collections,
-	createArtifact,
-	isArtifactAt,
-} from './artifact.js';
+import type { Artifact } from './artifact.js';
+import * as artifacts from './artifact.js';
 import { applyPlugins } from './plugins.js';
 
 const SENTINEL_PATH = `${createId()}.js`;
@@ -20,7 +16,7 @@ const esbuildPlugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (args.path === SENTINEL_PATH || isArtifactAt(args.path)) {
+			if (args.path === SENTINEL_PATH || artifacts.isArtifactAt(args.path)) {
 				return {
 					path: args.path,
 					namespace: 'artifact',
@@ -35,7 +31,7 @@ const esbuildPlugin: esbuild.Plugin = {
 				contents:
 					args.path === SENTINEL_PATH
 						? 'export default null;'
-						: createArtifact(args.path).text(),
+						: artifacts.create(args.path).text(),
 				loader: 'ts',
 				resolveDir: nodePath.dirname(args.path),
 			};
@@ -57,7 +53,7 @@ const esbuildPlugin: esbuild.Plugin = {
 		build.onLoad({ filter: /.*/ }, async (args) => {
 			const ext = args.path.slice(args.path.lastIndexOf('.'));
 			if (!known_exts.has(ext) && args.path.startsWith(options.source_path)) {
-				const artifact = createArtifact(args.path);
+				const artifact = artifacts.create(args.path);
 				if (args.namespace !== 'artifact') {
 					tempArtifacts.add(artifact);
 				}
@@ -95,7 +91,7 @@ const esbuildPlugin: esbuild.Plugin = {
 /** Runs JS/TS bundling */
 export async function bundle(): Promise<void> {
 	const paths = [];
-	for (const artifact of artifact_collections.bundler) {
+	for (const artifact of artifacts.collections.bundler) {
 		paths.push(artifact.path);
 	}
 
@@ -128,10 +124,10 @@ export async function bundle(): Promise<void> {
 	for (const output of result.outputFiles) {
 		const static_path = output.path.slice(1);
 		if (static_path !== SENTINEL_PATH) {
-			const artifact = createArtifact(static_path);
+			const artifact = artifacts.create(static_path);
 			artifact.update(output.text);
 
-			artifact_collections.bundler.add(artifact);
+			artifacts.collections.bundler.add(artifact);
 		}
 	}
 }
