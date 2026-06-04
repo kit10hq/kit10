@@ -7,15 +7,16 @@ type ArtifactOptions = {
 declare class Artifact {
   #private;
   readonly id: string;
+  dependents: Set<Artifact>;
   dependencies: Set<Artifact>;
   readonly meta: Record<string, unknown>;
   constructor(symbol: symbol, arg0: string | Artifact, options?: ArtifactOptions);
   get path(): string;
+  get absolute_path(): string;
   get is_page(): boolean;
   get ext(): string;
   /** Updates the file extension. */
   updateExt(ext: string): void;
-  get is_dependency(): boolean;
   get is_loaded(): boolean;
   /** Loads the file content from the source. */
   load(): Promise<void>;
@@ -35,8 +36,6 @@ declare class Artifact {
   create(content: ArtifactContent, options: ArtifactOptions): Artifact;
   /** Processes the artifact. */
   process(): Promise<void>;
-  /** Makes artifact independent. */
-  detach(): void;
 }
 //#endregion
 //#region src/build/plugins.d.ts

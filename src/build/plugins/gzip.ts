@@ -5,7 +5,7 @@ import type { Plugin } from '../plugins.js';
 const gzip = promisify(zlib.gzip);
 
 export const gzipPlugin: Plugin = {
-	filter: '*',
+	filter: /\.(?:css|html|js|json|svg)$/u,
 	async transform(artifact, options) {
 		if (options.is_prod) {
 			const buffer = artifact.buffer();

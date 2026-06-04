@@ -1,4 +1,4 @@
-import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-C9TSuTfd.mjs";
+import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-CQtPneOe.mjs";
 import nodePath from "node:path";
 import fs from "node:fs/promises";
 import { customAlphabet } from "nanoid";
@@ -43,7 +43,7 @@ var Artifact = class Artifact {
 	id = createId();
 	#path;
 	#content = null;
-	#parentArtifact;
+	dependents = /* @__PURE__ */ new Set();
 	dependencies = /* @__PURE__ */ new Set();
 	meta = {};
 	constructor(symbol, arg0, options) {
@@ -56,8 +56,8 @@ var Artifact = class Artifact {
 			}
 			this.#path = path;
 		} else {
-			this.#parentArtifact = arg0;
-			this.#parentArtifact.dependencies.add(this);
+			arg0.dependencies.add(this);
+			this.dependents.add(arg0);
 			if (options.keep_name) this.#path = arg0.path + "." + options.ext;
 			else {
 				this.#path = arg0.path.includes(nodePath.sep) ? nodePath.dirname(arg0.path) + "/" : "";
@@ -74,6 +74,9 @@ var Artifact = class Artifact {
 	get path() {
 		return this.#path;
 	}
+	get absolute_path() {
+		return nodePath.join(source_path, this.#path);
+	}
 	get is_page() {
 		return this.#path.match(/\+page\.[^.]+$/u) !== null;
 	}
@@ -85,9 +88,6 @@ var Artifact = class Artifact {
 		artifacts.delete(this.#path);
 		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
 		artifacts.set(this.#path, this);
-	}
-	get is_dependency() {
-		return this.#parentArtifact !== void 0;
 	}
 	get is_loaded() {
 		return this.#content !== null;
@@ -128,7 +128,8 @@ var Artifact = class Artifact {
 	delete() {
 		this.#content = null;
 		artifacts.delete(this.path);
-		if (this.#parentArtifact !== void 0) this.#parentArtifact.dependencies.delete(this);
+		for (const artifact of this.dependents) artifact.dependencies.delete(this);
+		this.dependents.clear();
 		for (const artifact of this.dependencies) artifact.delete();
 	}
 	/** Creates dependency artifact. */
@@ -140,13 +141,6 @@ var Artifact = class Artifact {
 	/** Processes the artifact. */
 	async process() {
 		await applyPlugins([this], config.plugins);
-	}
-	/** Makes artifact independent. */
-	detach() {
-		if (this.#parentArtifact !== void 0) {
-			this.#parentArtifact.dependencies.delete(this);
-			this.#parentArtifact = void 0;
-		}
 	}
 };
 /**
@@ -281,7 +275,7 @@ async function bundle() {
 //#region src/build/plugins/gzip.ts
 const gzip = promisify(zlib.gzip);
 const gzipPlugin = {
-	filter: "*",
+	filter: /\.(?:css|html|js|json|svg)$/u,
 	async transform(artifact, options) {
 		if (options.is_prod) {
 			const buffer = artifact.buffer();
@@ -300,35 +294,61 @@ const textDecoder = new TextDecoder();
 const html_inline_threshold = config.build?.html_inline_threshold ?? 2e3;
 const htmlScanImportsPlugin = {
 	filter: "*",
-	transform(artifact) {
+	async transform(artifact) {
 		const scriptSrcArtifact = artifact.create("", { ext: "js" });
+		scriptSrcArtifact.meta.html_type = "script";
 		let result = "";
 		const rewriter = new HTMLRewriter((chunk) => {
 			result += textDecoder.decode(chunk);
 		});
+		const promises = [];
 		let tag_content = "";
-		rewriter.on("script", {
-			element(element) {
+		rewriter.on("*", {
+			element() {
 				tag_content = "";
-				if (element.getAttribute("type") === "module") {
-					const attr_src = element.getAttribute("src");
-					if (attr_src === null) {
-						const scriptArtifact = artifact.create("", { ext: "js" });
-						artifact_collections.bundler.add(scriptArtifact);
-						element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
-						element.onEndTag(() => {
-							scriptArtifact.update(tag_content);
-						});
-					} else {
-						scriptSrcArtifact.append(`import '${attr_src}';\n`);
-						element.remove();
-					}
-				}
 			},
 			text(node) {
 				if (node.text) tag_content += node.text;
 			}
 		});
+		rewriter.on("script", { element(element) {
+			if (element.getAttribute("type") === "module") {
+				const attr_src = element.getAttribute("src");
+				if (attr_src === null) {
+					const scriptArtifact = artifact.create("", { ext: "js" });
+					scriptArtifact.meta.html_type = "script";
+					artifact_collections.bundler.add(scriptArtifact);
+					element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
+					element.onEndTag(() => {
+						scriptArtifact.update(tag_content);
+					});
+				} else {
+					scriptSrcArtifact.append(`import '${attr_src}';\n`);
+					element.remove();
+				}
+			} else throw new Error("Only script with type=\"module\" is supported for now.");
+		} });
+		rewriter.on("style", { element(element) {
+			const styleArtifact = artifact.create("", { ext: "css" });
+			styleArtifact.meta.html_type = "style";
+			element.setInnerContent(`/* ${styleArtifact.id} */`);
+			element.onEndTag(() => {
+				styleArtifact.update(tag_content);
+				promises.push(styleArtifact.process());
+			});
+		} });
+		rewriter.on("link", { element(element) {
+			if (element.getAttribute("rel") === "stylesheet" || element.getAttribute("rel") === "preload" && element.getAttribute("as") === "style") {
+				const path = element.getAttribute("href");
+				if (path !== null) {
+					const linkArtifact = createArtifact(nodePath.join(nodePath.dirname(artifact.path), path));
+					linkArtifact.meta.html_type = "link";
+					artifact.dependencies.add(linkArtifact);
+					promises.push(linkArtifact.load().then(() => linkArtifact.process()));
+					element.setAttribute("href", linkArtifact.id);
+				}
+			}
+		} });
 		rewriter.on("head", { element(element) {
 			element.append(`<!--${scriptSrcArtifact.id}-->`, { html: true });
 		} });
@@ -340,23 +360,33 @@ const htmlScanImportsPlugin = {
 			scriptSrcArtifact.delete();
 		}
 		artifact.update(result);
+		await Promise.all(promises);
 	}
 };
 const htmlWriteImportsPlugin = {
 	filter: "*",
 	transform(artifact) {
 		let content = artifact.text();
-		for (const artifactDependency of artifact.dependencies) {
-			const script_content = artifactDependency.text();
-			let html;
-			if (script_content.length > html_inline_threshold) {
-				html = `<script type="module" src="/${artifactDependency.path}"><\/script>`;
-				artifactDependency.detach();
-			} else {
-				html = `<script type="module">\n${script_content}<\/script>`;
-				artifactDependency.delete();
+		for (const artifactDependency of artifact.dependencies) switch (artifactDependency.meta.html_type) {
+			case "script": {
+				const script_content = artifactDependency.text();
+				let html;
+				if (script_content.length > html_inline_threshold) html = `<script type="module" src="/${artifactDependency.path}"><\/script>`;
+				else {
+					html = `<script type="module">\n${script_content}<\/script>`;
+					artifactDependency.delete();
+				}
+				content = content.replaceAll(`<!--${artifactDependency.id}-->`, html);
+				break;
 			}
-			content = content.replace(`<!--${artifactDependency.id}-->`, html);
+			case "style":
+				content = content.replaceAll(`/* ${artifactDependency.id} */`, artifactDependency.text());
+				artifactDependency.delete();
+				break;
+			case "link":
+				console.log("link found", artifactDependency.id, artifactDependency.path);
+				content = content.replaceAll(artifactDependency.id, "/" + artifactDependency.path);
+				break;
 		}
 		artifact.update(content);
 	}

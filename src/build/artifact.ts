@@ -31,7 +31,7 @@ export class Artifact {
 	readonly id: string = createId();
 	#path: string;
 	#content: ArtifactContent | null = null;
-	#parentArtifact: Artifact | undefined;
+	dependents: Set<Artifact> = new Set<Artifact>();
 	dependencies: Set<Artifact> = new Set<Artifact>();
 	readonly meta: Record<string, unknown> = {};
 
@@ -57,8 +57,8 @@ export class Artifact {
 
 			this.#path = path;
 		} else {
-			this.#parentArtifact = arg0;
-			this.#parentArtifact.dependencies.add(this);
+			arg0.dependencies.add(this);
+			this.dependents.add(arg0);
 
 			if (options!.keep_name) {
 				this.#path = arg0.path + '.' + options!.ext;
@@ -85,6 +85,10 @@ export class Artifact {
 		return this.#path;
 	}
 
+	get absolute_path(): string {
+		return nodePath.join(buildOptions.source_path, this.#path);
+	}
+
 	get is_page(): boolean {
 		return this.#path.match(/\+page\.[^.]+$/u) !== null;
 	}
@@ -98,11 +102,6 @@ export class Artifact {
 		artifacts.delete(this.#path);
 		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
 		artifacts.set(this.#path, this);
-	}
-
-	get is_dependency(): boolean {
-		// return artifacts_dependencies.has(this);
-		return this.#parentArtifact !== undefined;
 	}
 
 	get is_loaded(): boolean {
@@ -184,9 +183,11 @@ export class Artifact {
 		this.#content = null;
 		artifacts.delete(this.path);
 
-		if (this.#parentArtifact !== undefined) {
-			this.#parentArtifact.dependencies.delete(this);
+		for (const artifact of this.dependents) {
+			artifact.dependencies.delete(this);
 		}
+
+		this.dependents.clear();
 
 		for (const artifact of this.dependencies) {
 			artifact.delete();
@@ -204,14 +205,6 @@ export class Artifact {
 	/** Processes the artifact. */
 	async process(): Promise<void> {
 		await applyPlugins([this], buildOptions.config.plugins);
-	}
-
-	/** Makes artifact independent. */
-	detach(): void {
-		if (this.#parentArtifact !== undefined) {
-			this.#parentArtifact.dependencies.delete(this);
-			this.#parentArtifact = undefined;
-		}
 	}
 }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { r as output_path } from "./options-C9TSuTfd.mjs";
+import { r as output_path } from "./options-CQtPneOe.mjs";
 //#region src/main.ts
 const command = process.argv[2];
 if (command === "dev" || command === "build") {
-	await import("./build-CPZmmGk2.mjs");
+	await import("./build-UkwaCyCP.mjs");
 	if (command === "dev") await import(output_path + "/main.js");
 } else {
 	console.error(`Unknown command "${command}".`);
