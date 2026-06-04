@@ -1,6 +1,7 @@
 import { type WalkSpecificity, WalkSpecificityType } from './file-tree.js';
 
-export const RE_ENTRYPOINT = /^(?<name>.+)\+page\.(?<ext>[a-z]+)$/iu;
+// oxlint-disable-next-line typescript/no-inferrable-types
+export const RE_ENTRYPOINT: RegExp = /^(?<name>.+)\+page\.(?<ext>[a-z]+)$/iu;
 const RE_OPTIONAL_CATCH_ALL = /^\[\[\.\.\.(?<key>[a-z_][\da-z_]*)\]\]$/iu;
 const RE_CATCH_ALL = /^\[\.\.\.(?<key>[a-z_][\da-z_]*)\]$/iu;
 
@@ -13,7 +14,10 @@ type FSEntryRoute = {
  * Checks if file is an entrypoint file (i.e. ends with `+page.html`).
  * Returns the filename without the `.page.html` extension, or `null` if not found.
  */
-export function getEntrypointName(name: string) {
+export function getEntrypointName(name: string): {
+	name: string;
+	ext: string;
+} | null {
 	const match = RE_ENTRYPOINT.exec(name);
 	if (!match) {
 		return null;

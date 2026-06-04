@@ -13,8 +13,11 @@
 		"node": ">=22.16"
 	},
 	"dependencies": {
+		"@minify-html/node": "0.18.1",
+		"browserslist": "4.28.2",
 		"esbuild": "0.28.0",
 		"html-rewriter-wasm": "0.4.1",
+		"lightningcss": "1.32.0",
 		"nanoid": "5.1.11"
 	},
 	"optionalDependencies": {
@@ -36,8 +39,9 @@
 	"scripts": {
 		"build": "tsdown src/main.ts --unused --dts --format esm",
 		"check": "bun run lint && bun run build && bun run test",
-		"lint": "biome format && oxlint && eslint . && tsc && (cd test && tsc)",
-		"test": "echo 'no tests specifies'"
+		"lint": "biome format && oxlint && eslint . && tsc",
+		"pack": "bun run check && dev pack create",
+		"test": "echo 'No tests specified'"
 	},
 	"repository": {
 		"type": "git",

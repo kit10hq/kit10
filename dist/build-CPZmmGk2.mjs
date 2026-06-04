@@ -1,22 +1,43 @@
-import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-Hr4G0kDO.mjs";
+import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-C9TSuTfd.mjs";
 import nodePath from "node:path";
 import fs from "node:fs/promises";
 import { customAlphabet } from "nanoid";
+import * as esbuild from "esbuild";
+import { promisify } from "node:util";
+import zlib from "node:zlib";
 import { HTMLRewriter } from "html-rewriter-wasm";
+import { minify } from "@minify-html/node";
 import { readdirSync } from "node:fs";
 //#region src/utils.ts
 const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
 customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
 //#endregion
+//#region src/build/plugins.ts
+/** Applies the plugins from the config. */
+async function applyPlugins(artifacts, plugins) {
+	if (!plugins) return;
+	const artifacts_set = artifacts instanceof Set ? artifacts : new Set(artifacts);
+	for (const plugin of plugins) {
+		const promises = [];
+		for (const artifact of artifacts_set) if (plugin.filter === "*" || plugin.filter.test(artifact.path)) {
+			const result = plugin.transform(artifact, { is_prod });
+			if (result instanceof Promise) promises.push(result);
+		}
+		if (promises.length > 0) await Promise.all(promises);
+	}
+}
+//#endregion
 //#region src/build/artifact.ts
 const artifacts = /* @__PURE__ */ new Map();
-const artifacts_dependencies = /* @__PURE__ */ new WeakSet();
 const artifact_collections = {
 	pre_html: /* @__PURE__ */ new Set(),
-	html: /* @__PURE__ */ new Set()
+	html: /* @__PURE__ */ new Set(),
+	bundler: /* @__PURE__ */ new Set()
 };
 const directories = /* @__PURE__ */ new Set();
 const mkdir_promises = [];
+const textEncoder$1 = new TextEncoder();
+const textDecoder$1 = new TextDecoder();
 const SYMBOL = Symbol("Artifact");
 var Artifact = class Artifact {
 	id = createId();
@@ -25,7 +46,7 @@ var Artifact = class Artifact {
 	#parentArtifact;
 	dependencies = /* @__PURE__ */ new Set();
 	meta = {};
-	constructor(symbol, arg0, ext) {
+	constructor(symbol, arg0, options) {
 		if (symbol !== SYMBOL) throw new Error("Artifact constructor is private, use createArtifact() instead.");
 		if (typeof arg0 === "string") {
 			let path = arg0;
@@ -37,8 +58,11 @@ var Artifact = class Artifact {
 		} else {
 			this.#parentArtifact = arg0;
 			this.#parentArtifact.dependencies.add(this);
-			this.#path = `${arg0.path.includes("/") ? arg0.path.slice(0, arg0.path.lastIndexOf("/") + 1) : ""}${this.id}.${ext}`;
-			artifacts_dependencies.add(this);
+			if (options.keep_name) this.#path = arg0.path + "." + options.ext;
+			else {
+				this.#path = arg0.path.includes(nodePath.sep) ? nodePath.dirname(arg0.path) + "/" : "";
+				this.#path += `${this.id}.${options.ext}`;
+			}
 		}
 		artifacts.set(this.#path, this);
 		const dir = nodePath.dirname(nodePath.join(output_static_path, this.#path));
@@ -62,6 +86,9 @@ var Artifact = class Artifact {
 		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
 		artifacts.set(this.#path, this);
 	}
+	get is_dependency() {
+		return this.#parentArtifact !== void 0;
+	}
 	get is_loaded() {
 		return this.#content !== null;
 	}
@@ -70,10 +97,23 @@ var Artifact = class Artifact {
 		if (typeof this.#content === "string") throw new Error(`Artifact "${this.path}" already has content, but source was requested. This can lead to incorrect behavior.`);
 		this.#content = await fs.readFile(nodePath.join(source_path, this.path), "utf8");
 	}
-	/** Returns the file content. */
+	/** Returns content type. */
+	get type() {
+		if (this.#content instanceof Uint8Array) return "binary";
+		if (typeof this.#content === "string") return "text";
+		return "unknown";
+	}
+	/** Returns the file content as a string. */
 	text() {
-		if (this.#content === void 0 || this.#content === null) throw new Error(`Artifact "${this.path}" not loaded.`);
-		return this.#content;
+		if (typeof this.#content === "string") return this.#content;
+		if (this.#content instanceof Uint8Array) return textDecoder$1.decode(this.#content);
+		throw new Error(`Artifact "${this.path}" not loaded.`);
+	}
+	/** Returns the file content as a buffer. */
+	buffer() {
+		if (this.#content instanceof Uint8Array) return this.#content;
+		if (typeof this.#content === "string") return textEncoder$1.encode(this.#content);
+		throw new Error(`Artifact "${this.path}" not loaded.`);
 	}
 	/** Updates temporary file content. */
 	update(content) {
@@ -81,6 +121,7 @@ var Artifact = class Artifact {
 	}
 	/** Appends content to the temporary file. */
 	append(content) {
+		if (typeof this.#content !== "string") throw new TypeError(`Cannot append to artifact "${this.path}" with buffer content inside.`);
 		this.#content = (this.#content ?? "") + content;
 	}
 	/** Deletes the temporary file. */
@@ -88,18 +129,23 @@ var Artifact = class Artifact {
 		this.#content = null;
 		artifacts.delete(this.path);
 		if (this.#parentArtifact !== void 0) this.#parentArtifact.dependencies.delete(this);
+		for (const artifact of this.dependencies) artifact.delete();
 	}
 	/** Creates dependency artifact. */
-	create(ext, content) {
-		const artifact = new Artifact(SYMBOL, this, ext);
+	create(content, options) {
+		const artifact = new Artifact(SYMBOL, this, options);
 		artifact.update(content);
 		return artifact;
+	}
+	/** Processes the artifact. */
+	async process() {
+		await applyPlugins([this], config.plugins);
 	}
 	/** Makes artifact independent. */
 	detach() {
 		if (this.#parentArtifact !== void 0) {
 			this.#parentArtifact.dependencies.delete(this);
-			artifacts_dependencies.delete(this);
+			this.#parentArtifact = void 0;
 		}
 	}
 };
@@ -121,59 +167,42 @@ function createArtifact(path) {
 	return artifact;
 }
 /** Logs artifacts. */
-function logArtifacts() {
-	console.log([...artifacts.keys()]);
-	console.log("artifacts", new Map([...artifacts.values()].map((artifact) => [artifact.path, artifact.text()])));
+function printArtifacts() {
+	console.log(`${artifacts.size} artifacts:`);
+	const info = [];
+	for (const artifact of artifacts.values()) info.push({
+		filename: artifact.path,
+		size: String(artifact.type === "text" ? artifact.text().length : artifact.type === "binary" ? artifact.buffer().length : "?").padStart(6)
+	});
+	console.table(info.toSorted((a, b) => a.filename.localeCompare(b.filename)));
 }
 /** Writes all temporary files to disk. */
 async function flushArtifacts() {
 	await Promise.all(mkdir_promises);
 	const promises = [];
 	for (const artifact of artifacts.values()) {
-		if (artifacts_dependencies.has(artifact)) continue;
 		const output_file_path = nodePath.join(output_static_path, artifact.path);
-		const content = artifact.text();
 		let promise;
-		if (content === null) {
+		if (artifact.is_loaded) promise = fs.writeFile(output_file_path, artifact.buffer());
+		else {
 			const source_file_path = nodePath.join(source_path, artifact.path);
 			promise = fs.cp(source_file_path, output_file_path);
-		} else promise = fs.writeFile(output_file_path, content);
+		}
 		promises.push(promise);
 	}
 	await Promise.all(promises);
 }
 //#endregion
-//#region src/build/plugins.ts
-/** Applies the plugins from the config. */
-async function applyPlugins(artifacts, plugins) {
-	if (!plugins) return;
-	const artifacts_set = artifacts instanceof Set ? artifacts : new Set(artifacts);
-	for (const plugin of plugins) {
-		const promises = [];
-		for (const artifact of artifacts_set) if (plugin.filter === "*" || plugin.filter.test(artifact.path)) {
-			const result = plugin.transform(artifact, { is_prod });
-			if (result instanceof Promise) promises.push(result);
-		}
-		if (promises.length > 0) await Promise.all(promises);
-	}
-}
-//#endregion
 //#region src/build/bundler.ts
 const SENTINEL_PATH = `${createId()}.js`;
-const paths = /* @__PURE__ */ new Set();
-const bundlerPlugin = {
+const esbuildPlugin = {
 	name: "kit10",
 	setup(build) {
 		build.onResolve({ filter: /.*/ }, (args) => {
-			console.log("bundler onResolve", args);
 			if (args.path === SENTINEL_PATH || isArtifactAt(args.path)) return {
 				path: args.path,
 				namespace: "artifact"
 			};
-			else if (args.path.startsWith(".")) {
-				console.log(nodePath.join(nodePath.dirname(nodePath.join(source_path, args.importer)), args.path));
-				return { path: nodePath.join(nodePath.dirname(nodePath.join(source_path, args.importer)), args.path) };
-			}
 		});
 		build.onLoad({
 			filter: /.*/,
@@ -196,7 +225,6 @@ const bundlerPlugin = {
 		]);
 		const tempArtifacts = /* @__PURE__ */ new Set();
 		build.onLoad({ filter: /.*/ }, async (args) => {
-			console.log("bundler onLoad", args);
 			const ext = args.path.slice(args.path.lastIndexOf("."));
 			if (!known_exts.has(ext) && args.path.startsWith(source_path)) {
 				const artifact = createArtifact(args.path);
@@ -221,27 +249,59 @@ const bundlerPlugin = {
 };
 /** Runs JS/TS bundling */
 async function bundle() {
-	const result = await Bun.build({
-		plugins: [bundlerPlugin],
-		entrypoints: [SENTINEL_PATH, ...paths],
+	const paths = [];
+	for (const artifact of artifact_collections.bundler) paths.push(artifact.path);
+	const result = await esbuild.build({
+		absWorkingDir: source_path,
+		plugins: [esbuildPlugin],
+		entryPoints: [SENTINEL_PATH, ...paths],
+		outdir: "/",
+		bundle: true,
+		chunkNames: "js/chunks/[hash]",
 		format: "esm",
 		minify: is_prod,
-		naming: { chunk: "js/chunks/[hash].js" },
-		splitting: true
+		splitting: true,
+		write: false
 	});
-	for (const output of result.outputs) {
-		const static_path = nodePath.resolve("/", output.path).slice(1);
-		if (static_path !== SENTINEL_PATH) createArtifact(static_path).update(await output.text());
+	if (result.errors.length > 0) {
+		console.error("esbuild errors:");
+		for (const error of result.errors) console.error(error.text);
+		process.exit(1);
+	}
+	for (const output of result.outputFiles) {
+		const static_path = output.path.slice(1);
+		if (static_path !== SENTINEL_PATH) {
+			const artifact = createArtifact(static_path);
+			artifact.update(output.text);
+			artifact_collections.bundler.add(artifact);
+		}
 	}
 }
+//#endregion
+//#region src/build/plugins/gzip.ts
+const gzip = promisify(zlib.gzip);
+const gzipPlugin = {
+	filter: "*",
+	async transform(artifact, options) {
+		if (options.is_prod) {
+			const buffer = artifact.buffer();
+			const buffer_compressed = await gzip(buffer, { level: 9 });
+			if (buffer_compressed.length < buffer.length) artifact.create(buffer_compressed, {
+				ext: "gz",
+				keep_name: true
+			});
+		}
+	}
+};
 //#endregion
 //#region src/build/plugins/html/imports.ts
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const html_inline_threshold = config.build?.html_inline_threshold ?? 2e3;
 const htmlScanImportsPlugin = {
 	filter: "*",
 	transform(artifact) {
-		const scriptSrcArtifact = artifact.create("js", "");
+		const scriptSrcArtifact = artifact.create("", { ext: "js" });
 		let result = "";
 		const rewriter = new HTMLRewriter((chunk) => {
 			result += textDecoder.decode(chunk);
@@ -253,8 +313,8 @@ const htmlScanImportsPlugin = {
 				if (element.getAttribute("type") === "module") {
 					const attr_src = element.getAttribute("src");
 					if (attr_src === null) {
-						const scriptArtifact = artifact.create("js", "");
-						paths.add(scriptArtifact.path);
+						const scriptArtifact = artifact.create("", { ext: "js" });
+						artifact_collections.bundler.add(scriptArtifact);
 						element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 						element.onEndTag(() => {
 							scriptArtifact.update(tag_content);
@@ -274,7 +334,7 @@ const htmlScanImportsPlugin = {
 		} });
 		rewriter.write(textEncoder.encode(artifact.text()));
 		rewriter.end();
-		if (scriptSrcArtifact.text().length > 0) paths.add(scriptSrcArtifact.path);
+		if (scriptSrcArtifact.text().length > 0) artifact_collections.bundler.add(scriptSrcArtifact);
 		else {
 			result = result.replace(`<!--${scriptSrcArtifact.id}-->`, "");
 			scriptSrcArtifact.delete();
@@ -289,7 +349,7 @@ const htmlWriteImportsPlugin = {
 		for (const artifactDependency of artifact.dependencies) {
 			const script_content = artifactDependency.text();
 			let html;
-			if (script_content.length > 2e3) {
+			if (script_content.length > html_inline_threshold) {
 				html = `<script type="module" src="/${artifactDependency.path}"><\/script>`;
 				artifactDependency.detach();
 			} else {
@@ -299,6 +359,35 @@ const htmlWriteImportsPlugin = {
 			content = content.replace(`<!--${artifactDependency.id}-->`, html);
 		}
 		artifact.update(content);
+	}
+};
+//#endregion
+//#region src/build/plugins/html/minify.ts
+const MINIFY_HTML_OPTIONS = {
+	allow_noncompliant_unquoted_attribute_values: false,
+	allow_optimal_entities: false,
+	allow_removing_spaces_between_attributes: false,
+	keep_closing_tags: false,
+	keep_comments: false,
+	keep_html_and_head_opening_tags: true,
+	keep_input_type_text_attr: true,
+	keep_ssi_comments: false,
+	minify_css: false,
+	minify_doctype: false,
+	minify_js: false,
+	preserve_brace_template_syntax: false,
+	preserve_chevron_percent_template_syntax: false,
+	remove_bangs: true,
+	remove_processing_instructions: true
+};
+const minifyHtmlPlugin = {
+	filter: "*",
+	transform(artifact, options) {
+		if (options.is_prod) {
+			const html = artifact.text();
+			const html_minified = minify(Buffer.from(html), MINIFY_HTML_OPTIONS).toString("utf8");
+			artifact.update(html_minified);
+		}
 	}
 };
 //#endregion
@@ -506,7 +595,7 @@ async function flushRouter() {
 	await fs.cp(kit10_template_path, output_path, { recursive: true });
 	{
 		const app_routes_js = [];
-		for (const [route, artifact] of app_routes.entries()) app_routes_js.push(`app.get('${route}', (c) => handler(c, '${artifact.path}'));`);
+		for (const [route, artifact] of app_routes.entries()) app_routes_js.push(`app.get('${route}', serveFile('/${artifact.path}'));`);
 		const PATH_MAIN = nodePath.join(output_path, "main.js");
 		let contents = await fs.readFile(PATH_MAIN, "utf8");
 		contents = contents.replace("// MARK: app", app_routes_js.join("\n")).replace("port: 0,", `port: ${config.server?.port ?? 3e3},`);
@@ -515,6 +604,7 @@ async function flushRouter() {
 }
 //#endregion
 //#region src/build.ts
+const start = process.hrtime.bigint();
 await parseEntrypoints();
 await applyPlugins(artifact_collections.pre_html, config.plugins);
 for (const artifact of artifact_collections.pre_html) {
@@ -527,9 +617,44 @@ for (const artifact of artifact_collections.pre_html) {
 artifact_collections.pre_html.clear();
 await applyPlugins(artifact_collections.html.values(), [htmlTemplatePlugin, htmlScanImportsPlugin]);
 await bundle();
-await applyPlugins(artifact_collections.html.values(), [htmlWriteImportsPlugin]);
-logArtifacts();
+await applyPlugins(artifact_collections.bundler.values(), config.plugins);
+await applyPlugins(artifact_collections.html.values(), [htmlWriteImportsPlugin, minifyHtmlPlugin]);
+await applyPlugins(artifacts.values(), [gzipPlugin]);
+printArtifacts();
 await flushRouter();
 await flushArtifacts();
+/**
+* Format nanoseconds as a human-readable string.
+* @param nanoseconds - The number of nanoseconds to format.
+* @returns The formatted string.
+*/
+function formatNanoseconds(nanoseconds) {
+	for (const { unit, factor } of [
+		{
+			unit: "s",
+			factor: 1e9
+		},
+		{
+			unit: "ms",
+			factor: 1e6
+		},
+		{
+			unit: "µs",
+			factor: 1e3
+		},
+		{
+			unit: "ns",
+			factor: 1
+		}
+	]) {
+		const value = nanoseconds / factor;
+		if (value >= 1 || unit === "ns") {
+			const strValue = value.toPrecision(3);
+			return `${Number.parseFloat(strValue)} ${unit}`;
+		}
+	}
+	return "0 ns";
+}
+console.log(`Complete in ${formatNanoseconds(Number(process.hrtime.bigint() - start))}.`);
 //#endregion
 export {};

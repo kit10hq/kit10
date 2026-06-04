@@ -1,16 +1,16 @@
 // oxlint-disable unicorn/no-process-exit
 
 import nodePath from 'node:path';
-import * as esbuild from 'esbuild';
+import type { BunPlugin } from 'bun';
 import * as options from '../options.js';
 import { createId } from '../utils.js';
 import { type Artifact, createArtifact, isArtifactAt } from './artifact.js';
 import { applyPlugins } from './plugins.js';
 
 const SENTINEL_PATH = `${createId()}.js`;
-export const paths = new Set<string>();
+export const paths: Set<string> = new Set<string>();
 
-const esbuildPlugin: esbuild.Plugin = {
+const bundlerPlugin: BunPlugin = {
 	name: 'kit10',
 	setup(build) {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
@@ -20,6 +20,15 @@ const esbuildPlugin: esbuild.Plugin = {
 				return {
 					path: args.path,
 					namespace: 'artifact',
+				};
+			}
+
+			if (args.path.startsWith('.')) {
+				return {
+					path: nodePath.join(
+						nodePath.dirname(nodePath.join(options.source_path, args.importer)),
+						args.path,
+					),
 				};
 			}
 		});
@@ -53,7 +62,6 @@ const esbuildPlugin: esbuild.Plugin = {
 		build.onLoad({ filter: /.*/ }, async (args) => {
 			const ext = args.path.slice(args.path.lastIndexOf('.'));
 			if (!known_exts.has(ext) && args.path.startsWith(options.source_path)) {
-				console.log('esbuild', args);
 				const artifact = createArtifact(args.path);
 				if (args.namespace !== 'artifact') {
 					tempArtifacts.add(artifact);
@@ -90,37 +98,24 @@ const esbuildPlugin: esbuild.Plugin = {
 };
 
 /** Runs JS/TS bundling */
-export async function bundle() {
-	const result = await esbuild.build({
-		absWorkingDir: options.source_path,
-		plugins: [esbuildPlugin],
-		entryPoints: [SENTINEL_PATH, ...paths],
-		outdir: '/',
+export async function bundle(): Promise<void> {
+	const result = await Bun.build({
+		plugins: [bundlerPlugin],
+		entrypoints: [SENTINEL_PATH, ...paths],
 		//
-		bundle: true,
-		chunkNames: 'js/chunks/[hash]',
 		format: 'esm',
 		minify: options.is_prod,
+		naming: {
+			chunk: 'js/chunks/[hash].js',
+		},
 		splitting: true,
-		write: false,
 	});
-	if (result.errors.length > 0) {
-		// oxlint-disable-next-line no-console
-		console.error('esbuild errors:');
-		for (const error of result.errors) {
-			// oxlint-disable-next-line no-console
-			console.error(error.text);
-		}
 
-		process.exit(1);
-	}
-
-	// console.log('esbuild', result);
-
-	for (const artifact of result.outputFiles) {
-		const static_path = artifact.path.slice(1);
+	for (const output of result.outputs) {
+		const static_path = nodePath.resolve('/', output.path).slice(1);
 		if (static_path !== SENTINEL_PATH) {
-			createArtifact(static_path).update(artifact.text);
+			// oxlint-disable-next-line no-await-in-loop
+			createArtifact(static_path).update(await output.text());
 		}
 	}
 }

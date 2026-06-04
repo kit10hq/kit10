@@ -1,39 +1,29 @@
 // oxlint-disable unicorn/no-process-exit
 
 import nodePath from 'node:path';
-import type { BunPlugin } from 'bun';
+import * as esbuild from 'esbuild';
 import * as options from '../options.js';
 import { createId } from '../utils.js';
-import { type Artifact, createArtifact, isArtifactAt } from './artifact.js';
+import {
+	type Artifact,
+	artifact_collections,
+	createArtifact,
+	isArtifactAt,
+} from './artifact.js';
 import { applyPlugins } from './plugins.js';
 
 const SENTINEL_PATH = `${createId()}.js`;
-export const paths = new Set<string>();
 
-const bundlerPlugin: BunPlugin = {
+const esbuildPlugin: esbuild.Plugin = {
 	name: 'kit10',
 	setup(build) {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			console.log('bundler onResolve', args);
 			if (args.path === SENTINEL_PATH || isArtifactAt(args.path)) {
 				return {
 					path: args.path,
 					namespace: 'artifact',
-				};
-			} else if (args.path.startsWith('.')) {
-				console.log(
-					nodePath.join(
-						nodePath.dirname(nodePath.join(options.source_path, args.importer)),
-						args.path,
-					),
-				);
-				return {
-					path: nodePath.join(
-						nodePath.dirname(nodePath.join(options.source_path, args.importer)),
-						args.path,
-					),
 				};
 			}
 		});
@@ -65,10 +55,8 @@ const bundlerPlugin: BunPlugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onLoad({ filter: /.*/ }, async (args) => {
-			console.log('bundler onLoad', args);
 			const ext = args.path.slice(args.path.lastIndexOf('.'));
 			if (!known_exts.has(ext) && args.path.startsWith(options.source_path)) {
-				// console.log('bundler onLoad', args);
 				const artifact = createArtifact(args.path);
 				if (args.namespace !== 'artifact') {
 					tempArtifacts.add(artifact);
@@ -105,24 +93,45 @@ const bundlerPlugin: BunPlugin = {
 };
 
 /** Runs JS/TS bundling */
-export async function bundle() {
-	const result = await Bun.build({
-		// root: options.source_path,
-		plugins: [bundlerPlugin],
-		entrypoints: [SENTINEL_PATH, ...paths],
+export async function bundle(): Promise<void> {
+	const paths = [];
+	for (const artifact of artifact_collections.bundler) {
+		paths.push(artifact.path);
+	}
+
+	const result = await esbuild.build({
+		absWorkingDir: options.source_path,
+		plugins: [esbuildPlugin],
+		entryPoints: [SENTINEL_PATH, ...paths],
+		outdir: '/',
 		//
+		bundle: true,
+		chunkNames: 'js/chunks/[hash]',
 		format: 'esm',
 		minify: options.is_prod,
-		naming: {
-			chunk: 'js/chunks/[hash].js',
-		},
 		splitting: true,
+		write: false,
 	});
+	if (result.errors.length > 0) {
+		// oxlint-disable-next-line no-console
+		console.error('esbuild errors:');
+		for (const error of result.errors) {
+			// oxlint-disable-next-line no-console
+			console.error(error.text);
+		}
 
-	for (const output of result.outputs) {
-		const static_path = nodePath.resolve('/', output.path).slice(1);
+		process.exit(1);
+	}
+
+	// console.log('esbuild', result);
+
+	for (const output of result.outputFiles) {
+		const static_path = output.path.slice(1);
 		if (static_path !== SENTINEL_PATH) {
-			createArtifact(static_path).update(await output.text());
+			const artifact = createArtifact(static_path);
+			artifact.update(output.text);
+
+			artifact_collections.bundler.add(artifact);
 		}
 	}
 }

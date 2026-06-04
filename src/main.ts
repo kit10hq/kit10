@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 // oxlint-disable unicorn/no-process-exit
 
 import { output_path } from './options.js';
@@ -15,5 +17,6 @@ if (command === 'dev' || command === 'build') {
 	process.exit(1);
 }
 
+export type { Artifact } from './build/artifact.js';
 export type { Plugin } from './build/plugins.js';
 export type { Config } from './options.js';

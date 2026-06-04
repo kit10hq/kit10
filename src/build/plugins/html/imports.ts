@@ -1,19 +1,17 @@
-// import { randomUUID } from 'node:crypto';
-// import fs from 'node:fs/promises';
-// import nodePath from 'node:path';
 import { HTMLRewriter } from 'html-rewriter-wasm';
-// import * as options from '../../../options.js';
-// import { createArtifact } from '../../artifact.js';
-import * as bundler from '../../bundler.js';
+import * as buildOptions from '../../../options.js';
+import { artifact_collections } from '../../artifact.js';
 import type { Plugin } from '../../plugins.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const html_inline_threshold =
+	buildOptions.config.build?.html_inline_threshold ?? 2000;
 
 export const htmlScanImportsPlugin: Plugin = {
 	filter: '*',
 	transform(artifact) {
-		const scriptSrcArtifact = artifact.create('js', '');
+		const scriptSrcArtifact = artifact.create('', { ext: 'js' });
 
 		let result = '';
 		const rewriter = new HTMLRewriter((chunk) => {
@@ -29,9 +27,9 @@ export const htmlScanImportsPlugin: Plugin = {
 					const attr_src = element.getAttribute('src');
 					// inline script
 					if (attr_src === null) {
-						const scriptArtifact = artifact.create('js', '');
+						const scriptArtifact = artifact.create('', { ext: 'js' });
 
-						bundler.paths.add(scriptArtifact.path);
+						artifact_collections.bundler.add(scriptArtifact);
 						element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 
 						// wait for content to be collected
@@ -65,7 +63,7 @@ export const htmlScanImportsPlugin: Plugin = {
 		// create virtual file with all imports for HTML page
 		const script_src_content = scriptSrcArtifact.text();
 		if (script_src_content.length > 0) {
-			bundler.paths.add(scriptSrcArtifact.path);
+			artifact_collections.bundler.add(scriptSrcArtifact);
 		} else {
 			result = result.replace(`<!--${scriptSrcArtifact.id}-->`, '');
 			scriptSrcArtifact.delete();
@@ -84,7 +82,7 @@ export const htmlWriteImportsPlugin: Plugin = {
 
 			let html;
 			// if file is too large, add import
-			if (script_content.length > 2000) {
+			if (script_content.length > html_inline_threshold) {
 				html = `<script type="module" src="/${artifactDependency.path}"></script>`;
 				artifactDependency.detach();
 			} else {

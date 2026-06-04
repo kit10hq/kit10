@@ -9,16 +9,10 @@ import {
 	artifact_collections,
 	createArtifact,
 } from './artifact.js';
-import {
-	htmlScanImportsPlugin,
-	htmlWriteImportsPlugin,
-} from './plugins/html/imports.js';
-import { htmlTemplatePlugin } from './plugins/html/template.js';
-import { applyPlugins } from './plugins.js';
 import { getRoutes } from './router/file-tree.js';
 
 /** A map of routes to their corresponding Artifact instances. */
-export const app_routes = new Map<string, Artifact>();
+export const app_routes: Map<string, Artifact> = new Map<string, Artifact>();
 
 /**
  * Returns a list of TempFile instances for the app entrypoints.
@@ -50,7 +44,7 @@ export async function parseEntrypoints(): Promise<void> {
 }
 
 /** Writes router files to the output directory. */
-export async function flushRouter() {
+export async function flushRouter(): Promise<void> {
 	// copy template directory as dist
 	await fs.cp(env.kit10_template_path, options.output_path, {
 		recursive: true,
@@ -61,7 +55,7 @@ export async function flushRouter() {
 		const app_routes_js = [];
 		for (const [route, artifact] of app_routes.entries()) {
 			app_routes_js.push(
-				`app.get('${route}', (c) => handler(c, '${artifact.path}'));`,
+				`app.get('${route}', serveFile('/${artifact.path}'));`,
 			);
 		}
 
