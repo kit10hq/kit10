@@ -30,8 +30,9 @@ pnpm-lock.yaml
 yarn.lock
 
 # ignore repo configs
-.github/
+.forgejo/
 .gitea/
+.github/
 
 # ignore IDE files
 .idea

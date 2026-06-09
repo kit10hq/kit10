@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs';
 import nodePath from 'node:path';
+import * as buildOptions from '../options.js';
 import { getEntrypointName, parseFilename } from './filename.js';
 
 export enum WalkSpecificityType {
@@ -8,7 +9,7 @@ export enum WalkSpecificityType {
 	PARAMETER_OPTIONAL = 2,
 	CATCH_ALL = 3,
 }
-type RouteFile = {
+export type RouteFile = {
 	path: string;
 	ext: string;
 };
@@ -28,19 +29,18 @@ type WalkStateFile = {
 	specificity: WalkSpecificity;
 };
 type WalkState = WalkStateDir | WalkStateFile;
-type RouteData = {
+export type RouteData = {
 	route: string;
 	file: RouteFile;
 };
 
 /**
  * Returns the routes for the given path.
- * @param path The path to read files from.
- * @returns The routes for the given path.
+ * @returns -
  */
 // oxlint-disable-next-line max-lines-per-function
-export function getRoutes(path: string): RouteData[] {
-	return flatState(walk(path));
+export function getRoutes(): RouteData[] {
+	return flatState(walk(buildOptions.source_path));
 }
 
 /**

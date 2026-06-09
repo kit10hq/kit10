@@ -1,63 +1,27 @@
-//#region src/build/artifact.d.ts
-type ArtifactContent = string | Uint8Array;
-type ArtifactOptions = {
-  ext: string;
-  keep_name?: boolean;
-};
-declare class Artifact {
-  #private;
-  readonly id: string;
-  readonly meta: Record<string, unknown>;
-  constructor(symbol: symbol, arg0: string | Artifact, options?: ArtifactOptions);
-  get path(): string;
-  get absolute_path(): string;
-  get is_page(): boolean;
-  get ext(): string;
-  /** Updates the file extension. */
-  updateExt(ext: string): void;
-  get is_loaded(): boolean;
-  /** Loads the file content from the source. */
-  load(): Promise<void>;
-  /** Returns content type. */
-  get type(): "binary" | "text" | "unknown";
-  /** Returns the file content as a string. */
-  text(): string;
-  /** Returns the file content as a buffer. */
-  buffer(): Uint8Array;
-  /** Updates temporary file content. */
-  update(content: ArtifactContent): void;
-  /** Appends content to the temporary file. */
-  append(content: string): void;
-  /** Links this artifact to another artifact. */
-  link(artifact: Artifact): void;
-  /** Deletes the temporary file. */
-  delete(): void;
-  /** Creates dependency artifact. */
-  create(content: ArtifactContent, options: ArtifactOptions): Artifact;
-  /** Processes the artifact. */
-  process(): Promise<void>;
-}
-//#endregion
-//#region src/build/plugins.d.ts
+import { UserConfig } from "vite";
+
+//#region src/build/options.d.ts
 type Promisable<T> = T | Promise<T>;
-type Plugin = {
-  filter: "*" | RegExp;
-  transform: (artifact: Artifact, options: {
-    source_path: string;
-    is_prod: boolean;
-  }) => Promisable<void>;
-  end?: () => Promisable<void>;
+type CssPreprocessors = Exclude<UserConfig["css"], undefined>["preprocessorOptions"];
+type VitePlugin = Exclude<UserConfig["plugins"], undefined>[number];
+type Kit10HtmlPreprocessor = {
+  filter: RegExp;
+  transform: (path: string) => Promisable<string>;
 };
-//#endregion
-//#region src/options.d.ts
+type Kit10Plugin = {
+  kit10: true;
+  htmlPreprocessor?: Kit10HtmlPreprocessor;
+  vitePlugins?: VitePlugin[];
+};
 type Config = {
-  /** List of plugins to use. */plugins?: Plugin[]; /** Build options. */
+  /** List of plugins to use. */plugins?: (Kit10Plugin | VitePlugin)[]; /** Build options. */
   build?: {
-    /** If file size is within this threshold, it will be inlined into page. */html_inline_threshold?: number;
+    /** If JavaScript asset size is within this threshold, it will be inlined into page. */jsInlineTreshold?: number;
+    css_preprocessors?: CssPreprocessors;
   }; /** Server options. */
   server?: {
     /** Port to listen on. */port?: number;
   };
 };
 //#endregion
-export type { Artifact, Config, Plugin };
+export type { Config, Kit10Plugin };
