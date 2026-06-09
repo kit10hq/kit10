@@ -250,10 +250,15 @@ function createInlineScriptHtml(
 	attributes: Iterable<[string, string]>,
 	chunk: BundleChunk,
 ): string {
-	let html = '<script';
+	let html = '<script vite-ignore';
 
 	for (const [name, value] of attributes) {
-		if (name === 'src' || name === 'crossorigin' || name === 'integrity') {
+		if (
+			name === 'src'
+			|| name === 'crossorigin'
+			|| name === 'integrity'
+			|| name === 'vite-ignore'
+		) {
 			continue;
 		}
 

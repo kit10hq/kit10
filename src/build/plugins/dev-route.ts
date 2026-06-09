@@ -3,6 +3,7 @@ import { Hono } from 'hono/tiny';
 import type { Plugin } from 'vite';
 import { rewriteHtml } from '../html.js';
 import { getRoutes } from '../router/file-tree.js';
+import { inlineDevStyles } from './css-inline.js';
 import { getRouteHtmlUrl, loadRouteHtml } from './virtual-html.js';
 
 /** Creates a Vite plugin that serves the application's routes using Hono. */
@@ -26,6 +27,7 @@ export function devRoutePlugin(): Plugin {
 					);
 					const rewrite = await rewriteHtml(route_html.path, html);
 					html = rewrite.html;
+					html = await inlineDevStyles(html, server);
 
 					return htmlResponse(html);
 				});

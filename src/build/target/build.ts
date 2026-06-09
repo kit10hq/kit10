@@ -3,6 +3,7 @@ import nodePath from 'node:path';
 import { build } from 'vite';
 import * as buildOptions from '../options.js';
 import { configPlugin } from '../plugins/config.js';
+import { cssInlinePlugin } from '../plugins/css-inline.js';
 import { gzipPlugin } from '../plugins/gzip.js';
 import { htmlMinifyPlugin } from '../plugins/html-minify.js';
 import { jsInlinePlugin } from '../plugins/js-inline.js';
@@ -44,6 +45,7 @@ await build({
 		templatePlugin(),
 		...buildOptions.vitePlugins,
 		jsInlinePlugin(),
+		cssInlinePlugin(),
 		htmlMinifyPlugin(),
 		gzipPlugin(),
 	],

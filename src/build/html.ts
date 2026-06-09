@@ -1,6 +1,6 @@
 import nodePath from 'node:path';
 import * as esbuild from 'esbuild';
-import { HTMLRewriter } from 'html-rewriter-wasm';
+import { type Element, HTMLRewriter } from 'html-rewriter-wasm';
 import { isAbsoluteOrSpecialPath, textDecoder, textEncoder } from '../utils.js';
 import * as buildOptions from './options.js';
 
@@ -10,8 +10,23 @@ export type HtmlContent = {
 	html: string;
 };
 
+export const KIT10_INLINE_STYLE_ATTR = 'data-kit10-inline-style';
+
+type InlineScript = {
+	attributes: [string, string][];
+	contents: Promise<string>;
+	path: string;
+	placeholder: string;
+};
+
 const inlined = new Map<string, string>();
 const inlined_promises = new Map<string, Promise<string>>();
+const inline_style_sources = new Map<string, Set<string>>();
+
+/** Returns stylesheets marked as inline while rewriting an HTML file. */
+export function getInlineStyleSources(path: string): Set<string> {
+	return new Set(inline_style_sources.get(path));
+}
 
 /** Returns a safe value for an HTML attribute. */
 function escapeAttribute(value: string): string {
@@ -82,8 +97,7 @@ export async function rewriteHtml(
 	contents: string,
 ): Promise<HtmlContent> {
 	const dir = nodePath.dirname(path);
-
-	const promises: Promise<unknown>[] = [];
+	const scripts_to_inline: InlineScript[] = [];
 
 	let result = '';
 	let first_tag_name;
@@ -123,66 +137,144 @@ export async function rewriteHtml(
 		},
 	});
 
-	const scripts_to_inline = new Map<
-		string,
-		{ attributes: [string, string][] }
-	>();
-	rewriter.on('script', {
-		element(element) {
-			const import_path = element.getAttribute('src');
-			if (import_path) {
-				element.setAttribute('src', absolutePath(dir, import_path));
-
-				if (element.getAttribute('kit10:inline') !== null) {
-					const import_path_absolute = absolutePath(dir, import_path);
-					promises.push(bundle(import_path_absolute));
-
-					element.replace(`<!--script:${import_path_absolute}-->`, {
-						html: true,
-					});
-
-					scripts_to_inline.set(import_path_absolute, {
-						attributes: [...element.attributes].filter(
-							([key]) => key !== 'src' && key !== 'kit10:inline',
-						),
-					});
-				}
-			}
-		},
-	});
-
-	rewriter.on('link', {
-		element(element) {
-			const import_path = element.getAttribute('href');
-			if (import_path) {
-				element.setAttribute('href', absolutePath(dir, import_path));
-			}
-		},
-	});
+	registerScriptHandler(rewriter, dir, scripts_to_inline);
+	registerLinkHandler(rewriter, dir, path);
 
 	rewriter.write(textEncoder.encode(contents));
 	rewriter.end();
 
-	await Promise.all(promises);
-
-	for (const [inlined_path, inlined_options] of scripts_to_inline) {
-		const inlined_contents = inlined.get(inlined_path)!;
-
-		let script_html = `<script data-src="${inlined_path}"`;
-		for (const [key, value] of inlined_options.attributes) {
-			script_html += ` ${key}="${escapeAttribute(value)}"`;
-		}
-
-		script_html += `>${inlined_contents}</script>`;
-
-		result = result.replace(`<!--script:${inlined_path}-->`, script_html);
-	}
+	const html = await replaceInlineScripts(result, scripts_to_inline);
 
 	return {
 		is_full_page: first_tag_name === 'html',
 		kit10_head,
-		html: result,
+		html,
 	};
+}
+
+/** Registers script URL rewriting and kit10:inline script bundling. */
+function registerScriptHandler(
+	rewriter: HTMLRewriter,
+	dir: string,
+	scripts_to_inline: InlineScript[],
+): void {
+	let inline_script_index = 0;
+	rewriter.on('script', {
+		element(element) {
+			const import_path = element.getAttribute('src');
+			if (!import_path) {
+				return;
+			}
+
+			element.setAttribute('src', absolutePath(dir, import_path));
+
+			if (element.getAttribute('kit10:inline') === null) {
+				return;
+			}
+
+			const import_path_absolute = absolutePath(dir, import_path);
+			const inline_contents = bundle(import_path_absolute);
+			const placeholder = `kit10:inline-script:${inline_script_index++}`;
+
+			element.replace(`<!--${placeholder}-->`, { html: true });
+			scripts_to_inline.push({
+				attributes: getInlineScriptAttributes(element),
+				contents: inline_contents,
+				path: import_path_absolute,
+				placeholder,
+			});
+		},
+	});
+}
+
+/** Registers link URL rewriting and kit10:inline stylesheet markers. */
+function registerLinkHandler(
+	rewriter: HTMLRewriter,
+	dir: string,
+	html_path: string,
+): void {
+	rewriter.on('link', {
+		element(element) {
+			const import_path = element.getAttribute('href');
+			if (!import_path) {
+				return;
+			}
+
+			const import_path_absolute = absolutePath(dir, import_path);
+			element.setAttribute('href', import_path_absolute);
+
+			if (
+				element.getAttribute('kit10:inline') !== null
+				&& isInlineStyleLink(element)
+			) {
+				addInlineStyleSource(html_path, import_path_absolute);
+				element.removeAttribute('kit10:inline');
+				element.setAttribute(KIT10_INLINE_STYLE_ATTR, import_path_absolute);
+
+				if (isPreloadStyleLink(element)) {
+					element.setAttribute('rel', 'stylesheet');
+					element.removeAttribute('as');
+				}
+			}
+		},
+	});
+}
+
+/** Registers a stylesheet that should be inlined after Vite processes it. */
+function addInlineStyleSource(html_path: string, path: string): void {
+	if (!inline_style_sources.has(html_path)) {
+		inline_style_sources.set(html_path, new Set<string>());
+	}
+
+	inline_style_sources.get(html_path)!.add(path.replace(/[?#].*$/u, ''));
+}
+
+/** Replaces script placeholders with their bundled contents. */
+async function replaceInlineScripts(
+	html: string,
+	scripts_to_inline: InlineScript[],
+): Promise<string> {
+	const replacements = await Promise.all(
+		scripts_to_inline.map(async (script) => {
+			return {
+				html: await createInlineScriptHtml(script),
+				placeholder: script.placeholder,
+			};
+		}),
+	);
+
+	let result = html;
+	for (const replacement of replacements) {
+		result = result.replace(
+			`<!--${replacement.placeholder}-->`,
+			replacement.html,
+		);
+	}
+
+	return result;
+}
+
+/** Creates inline script HTML. */
+async function createInlineScriptHtml(script: InlineScript): Promise<string> {
+	const inlined_contents = await script.contents;
+	let html = `<script data-src="${escapeAttribute(script.path)}" vite-ignore`;
+
+	for (const [key, value] of script.attributes) {
+		html += ` ${key}="${escapeAttribute(value)}"`;
+	}
+
+	return `${html}>${escapeScriptContent(inlined_contents)}</script>`;
+}
+
+/** Returns script attributes that should survive inlining. */
+function getInlineScriptAttributes(element: Element): [string, string][] {
+	return [...element.attributes].filter(
+		([key]) =>
+			key !== 'src'
+			&& key !== 'kit10:inline'
+			&& key !== 'vite-ignore'
+			&& key !== 'data-src',
+	);
 }
 
 /**
@@ -199,4 +291,39 @@ function absolutePath(dir: string, path: string): string {
 	return nodePath
 		.normalize(nodePath.join(dir, path))
 		.replace(buildOptions.source_path, '');
+}
+
+/** Escapes JavaScript text for embedding in a script tag. */
+function escapeScriptContent(value: string): string {
+	return value
+		.replaceAll('</script', '<\\/script')
+		.replaceAll('<!--', '<\\!--');
+}
+
+/** Returns whether a rel attribute contains a token. */
+function hasRel(rel: string | null, token: string): boolean {
+	return (
+		rel?.split(/\s+/u).some((rel_token) => rel_token.toLowerCase() === token)
+		?? false
+	);
+}
+
+/** Returns whether a link points to a stylesheet that should be inlined. */
+function isInlineStyleLink(element: {
+	getAttribute(name: string): string | null;
+}): boolean {
+	return (
+		hasRel(element.getAttribute('rel'), 'stylesheet')
+		|| isPreloadStyleLink(element)
+	);
+}
+
+/** Returns whether a link preloads a stylesheet. */
+function isPreloadStyleLink(element: {
+	getAttribute(name: string): string | null;
+}): boolean {
+	return (
+		hasRel(element.getAttribute('rel'), 'preload')
+		&& element.getAttribute('as')?.toLowerCase() === 'style'
+	);
 }

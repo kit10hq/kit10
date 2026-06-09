@@ -1,11 +1,11 @@
-import { _ as vitePlugins, a as virtualHtmlPlugin, d as textEncoder, f as configPlugin, g as source_path, h as output_static_path, i as preprocessBuildRoutes, l as isAbsoluteOrSpecialPath, m as output_path, o as routes, p as config, t as templatePlugin, u as textDecoder } from "./template-BGn5GDwx.mjs";
+import { _ as output_static_path, a as virtualHtmlPlugin, c as cssInlinePlugin, d as isAbsoluteOrSpecialPath, f as textDecoder, g as output_path, h as config, i as preprocessBuildRoutes, m as configPlugin, o as routes, p as textEncoder, t as templatePlugin, v as source_path, y as vitePlugins } from "./template-BStXZWBr.mjs";
 import fs from "node:fs/promises";
 import nodePath from "node:path";
 import { build } from "vite";
+import { HTMLRewriter } from "html-rewriter-wasm";
 import { promisify } from "node:util";
 import zlib from "node:zlib";
 import minifyHtml from "@minify-html/node";
-import { HTMLRewriter } from "html-rewriter-wasm";
 //#region src/build/plugins/gzip.ts
 const gzip = promisify(zlib.gzip);
 const filter = /\.(?:html|xml|css|json|js|mjs|svg)$/iu;
@@ -187,9 +187,9 @@ function rewriteHtmlAssets(bundle, html_assets, candidates) {
 }
 /** Creates inline script HTML from a JavaScript chunk. */
 function createInlineScriptHtml(attributes, chunk) {
-	let html = "<script";
+	let html = "<script vite-ignore";
 	for (const [name, value] of attributes) {
-		if (name === "src" || name === "crossorigin" || name === "integrity") continue;
+		if (name === "src" || name === "crossorigin" || name === "integrity" || name === "vite-ignore") continue;
 		html += ` ${name}="${escapeAttribute(value)}"`;
 	}
 	const code = escapeScriptContent(rewriteRelativeImports(chunk.code, chunk.fileName));
@@ -279,6 +279,7 @@ await build({
 		templatePlugin(),
 		...vitePlugins,
 		jsInlinePlugin(),
+		cssInlinePlugin(),
 		htmlMinifyPlugin(),
 		gzipPlugin()
 	],

@@ -1,4 +1,4 @@
-import { _ as vitePlugins, a as virtualHtmlPlugin, c as rewriteHtml, f as configPlugin, g as source_path, n as getRouteHtmlUrl, r as loadRouteHtml, s as getRoutes, t as templatePlugin } from "./template-BGn5GDwx.mjs";
+import { a as virtualHtmlPlugin, l as inlineDevStyles, m as configPlugin, n as getRouteHtmlUrl, r as loadRouteHtml, s as getRoutes, t as templatePlugin, u as rewriteHtml, v as source_path, y as vitePlugins } from "./template-BStXZWBr.mjs";
 import { createServer } from "vite";
 //#region node_modules/hono/dist/compose.js
 var compose = (middleware, onError, onNotFound) => {
@@ -1246,6 +1246,7 @@ function devRoutePlugin() {
 				let { html } = route_html;
 				html = await server.transformIndexHtml(getRouteHtmlUrl(route_html.path), html, url_pathname);
 				html = (await rewriteHtml(route_html.path, html)).html;
+				html = await inlineDevStyles(html, server);
 				return htmlResponse(html);
 			});
 			return () => {
