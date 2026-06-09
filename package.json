@@ -19,18 +19,16 @@
 	"dependencies": {
 		"@minify-html/node": "0.18.1",
 		"esbuild": "0.28.0",
-		"hono": "4.12.23",
 		"html-rewriter-wasm": "0.4.1",
 		"vite": "8.0.16"
 	},
-	"optionalDependencies": {
-		"@hono/node-server": "2.0.4"
-	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.10",
+		"@hono/node-server": "2.0.4",
 		"@kirick/lint": "0.3.2",
 		"@types/node": "^22.15.13",
 		"eslint": "10.2.0",
+		"hono": "4.12.23",
 		"oxlint": "1.58.0",
 		"publint": "0.3.21",
 		"tsdown": "0.22.0",

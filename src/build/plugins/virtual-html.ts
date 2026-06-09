@@ -11,7 +11,7 @@ type RouteHtml = {
 
 const RE_EXTENSION = /\.[^.]+$/u;
 
-export const virtualHtmlFiles: Map<string, string> = new Map<string, string>();
+const virtualHtmlFiles: Map<string, string> = new Map<string, string>();
 
 /** Returns the virtual HTML path for a route source file. */
 export function getRouteHtmlPath(file: RouteFile): string {
@@ -80,12 +80,20 @@ export function virtualHtmlPlugin(): Plugin {
 		name: 'kit10:virtual-html',
 		enforce: 'pre',
 		resolveId(id) {
+			if (hasQueryOrHash(id)) {
+				return;
+			}
+
 			const key = getVirtualHtmlKey(id);
 			if (virtualHtmlFiles.has(key)) {
 				return key;
 			}
 		},
 		load(id) {
+			if (hasQueryOrHash(id)) {
+				return;
+			}
+
 			return virtualHtmlFiles.get(getVirtualHtmlKey(id));
 		},
 	};
@@ -94,7 +102,7 @@ export function virtualHtmlPlugin(): Plugin {
 /** Returns the single HTML preprocessor matching a source file. */
 function getHtmlPreprocessor(path: string): buildOptions.Kit10HtmlPreprocessor {
 	const preprocessors = buildOptions.kit10HtmlPreprocessors.filter(
-		(preprocessor) => matchesFilter(preprocessor.filter, path),
+		(preprocessor) => path.match(preprocessor.filter) !== null,
 	);
 
 	if (preprocessors.length === 0) {
@@ -112,18 +120,12 @@ function getHtmlPreprocessor(path: string): buildOptions.Kit10HtmlPreprocessor {
 	return preprocessors[0]!;
 }
 
-/** Returns whether a regular expression matches without leaking lastIndex state. */
-function matchesFilter(filter: RegExp, path: string): boolean {
-	filter.lastIndex = 0;
-	return filter.test(path);
-}
-
 /** Returns a stable key for virtual HTML file lookups. */
 function getVirtualHtmlKey(path: string): string {
-	return normalizePath(nodePath.resolve(path.replace(/[?#].*$/u, '')));
+	return nodePath.resolve(path);
 }
 
-/** Normalizes file paths for Vite/Rollup ids. */
-function normalizePath(path: string): string {
-	return path.replaceAll(nodePath.win32.sep, '/');
+/** Returns whether an id contains Vite query/hash metadata. */
+function hasQueryOrHash(path: string): boolean {
+	return /[?#]/u.test(path);
 }

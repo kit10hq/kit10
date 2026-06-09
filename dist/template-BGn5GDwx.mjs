@@ -423,33 +423,30 @@ function virtualHtmlPlugin() {
 		name: "kit10:virtual-html",
 		enforce: "pre",
 		resolveId(id) {
+			if (hasQueryOrHash(id)) return;
 			const key = getVirtualHtmlKey(id);
 			if (virtualHtmlFiles.has(key)) return key;
 		},
 		load(id) {
+			if (hasQueryOrHash(id)) return;
 			return virtualHtmlFiles.get(getVirtualHtmlKey(id));
 		}
 	};
 }
 /** Returns the single HTML preprocessor matching a source file. */
 function getHtmlPreprocessor(path) {
-	const preprocessors = kit10HtmlPreprocessors.filter((preprocessor) => matchesFilter(preprocessor.filter, path));
+	const preprocessors = kit10HtmlPreprocessors.filter((preprocessor) => path.match(preprocessor.filter) !== null);
 	if (preprocessors.length === 0) throw new Error(`No Kit10 HTML preprocessor matched "${path}". Add a plugin that can transform ".${nodePath.extname(path).slice(1)}" pages to HTML.`);
 	if (preprocessors.length > 1) throw new Error(`Multiple Kit10 HTML preprocessors matched "${path}". Make plugin filters mutually exclusive.`);
 	return preprocessors[0];
 }
-/** Returns whether a regular expression matches without leaking lastIndex state. */
-function matchesFilter(filter, path) {
-	filter.lastIndex = 0;
-	return filter.test(path);
-}
 /** Returns a stable key for virtual HTML file lookups. */
 function getVirtualHtmlKey(path) {
-	return normalizePath(nodePath.resolve(path.replace(/[?#].*$/u, "")));
+	return nodePath.resolve(path);
 }
-/** Normalizes file paths for Vite/Rollup ids. */
-function normalizePath(path) {
-	return path.replaceAll(nodePath.win32.sep, "/");
+/** Returns whether an id contains Vite query/hash metadata. */
+function hasQueryOrHash(path) {
+	return /[?#]/u.test(path);
 }
 //#endregion
 //#region src/build/plugins/template.ts
