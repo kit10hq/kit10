@@ -4,6 +4,7 @@ import nodePath from 'node:path';
 import { HTMLRewriter } from 'html-rewriter-wasm';
 import * as buildOptions from '../../../options.js';
 import { createId } from '../../../utils.js';
+import type { Artifact } from '../../artifact.js';
 import * as artifacts from '../../artifact.js';
 import { applyPlugins, type Plugin } from '../../plugins.js';
 
@@ -226,7 +227,7 @@ export const htmlWriteImportsPlugin: Plugin = {
 	},
 };
 
-const templateArtifact = artifacts.create('+template.html');
+const templateArtifact: Artifact = artifacts.create('+template.html');
 templateArtifact.meta.noout = true;
 await templateArtifact.load();
 await applyPlugins([templateArtifact], [htmlScanImportsPlugin]);
