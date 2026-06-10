@@ -1,5 +1,5 @@
 // @ts-check
-/* eslint-disable jsdoc/no-types */
+/* eslint-disable jsdoc/no-types, n/no-unpublished-import */
 
 /** @import { Handler } from 'hono'; */
 
