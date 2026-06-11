@@ -1,14 +1,15 @@
 // oxlint-disable unicorn/no-process-exit
 
-import nodePath from 'node:path';
 import * as esbuild from 'esbuild';
-import * as options from '../options.js';
-import { createId } from '../utils.js';
-import type { Artifact } from './artifact.js';
+import { createId, isLocalPath } from '../utils.js';
 import * as artifacts from './artifact.js';
+import { Artifact } from './artifact.js';
+import * as options from './options.js';
 import { applyPlugins } from './plugins.js';
 
 const SENTINEL_PATH = `${createId()}.js`;
+const JS_EXTS = new Set(['mjs', 'cjs', 'ts', 'mts', 'cts']);
+const KNOWN_EXTS = new Set(['js', ...JS_EXTS, 'json']);
 
 const esbuildPlugin: esbuild.Plugin = {
 	name: 'kit10',
@@ -16,7 +17,7 @@ const esbuildPlugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (args.path === SENTINEL_PATH || artifacts.isArtifactAt(args.path)) {
+			if (isLocalPath(args.path)) {
 				return {
 					path: args.path,
 					namespace: 'artifact',
@@ -24,65 +25,54 @@ const esbuildPlugin: esbuild.Plugin = {
 			}
 		});
 
+		const bundleArtifacts = new Set<Artifact>();
+
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
-		build.onLoad({ filter: /.*/, namespace: 'artifact' }, (args) => {
+		build.onLoad({ filter: /.*/, namespace: 'artifact' }, async (args) => {
+			let contents: string;
+			if (args.path === SENTINEL_PATH) {
+				contents = 'export default null;';
+			} else {
+				const artifact = new Artifact(
+					args.path.startsWith('./') ? args.path.slice(2) : args.path,
+				);
+				bundleArtifacts.add(artifact);
+
+				if (
+					!KNOWN_EXTS.has(artifact.ext)
+					&& isLocalPath(args.path)
+					&& args.path.startsWith(options.source_path)
+				) {
+					await applyPlugins([artifact]);
+
+					if (!KNOWN_EXTS.has(artifact.ext)) {
+						// oxlint-disable-next-line no-console
+						console.error(
+							`No plugins given for compiling ".${artifact.ext}" files to bundle JavaScript/TypeScript (found "${args.path}").`,
+						);
+						process.exit(1);
+					}
+				}
+
+				contents = await artifact.text();
+
+				if (JS_EXTS.has(artifact.ext)) {
+					artifact.updateExt('js');
+				}
+			}
+
 			return {
-				contents:
-					args.path === SENTINEL_PATH
-						? 'export default null;'
-						: artifacts.create(args.path).text(),
+				contents,
 				loader: 'ts',
-				resolveDir: nodePath.dirname(args.path),
 			};
 		});
 
-		const known_exts = new Set([
-			'js',
-			'mjs',
-			'cjs',
-			'ts',
-			'mts',
-			'cts',
-			'json',
-		]);
-		const tempArtifacts = new Set<Artifact>();
-
-		// With "u" flag, we get "filter is not a valid Go regular expression" error
-		// eslint-disable-next-line require-unicode-regexp
-		build.onLoad({ filter: /.*/ }, async (args) => {
-			const ext = args.path.slice(args.path.lastIndexOf('.'));
-			if (!known_exts.has(ext) && args.path.startsWith(options.source_path)) {
-				const artifact = artifacts.create(args.path);
-				if (args.namespace !== 'artifact') {
-					tempArtifacts.add(artifact);
-				}
-
-				if (!artifact.is_loaded) {
-					await artifact.load();
-				}
-
-				await applyPlugins([artifact], options.config.plugins);
-
-				if (!known_exts.has(artifact.ext)) {
-					// oxlint-disable-next-line no-console
-					console.error(
-						`No plugins given for compiling ".${artifact.ext}" files to bundle JavaScript/TypeScript (found "${args.path}").`,
-					);
-					process.exit(1);
-				}
-
-				return {
-					contents: artifact.text(),
-					loader: 'ts',
-					resolveDir: nodePath.dirname(args.path),
-				};
-			}
-		});
-
 		build.onEnd(() => {
-			for (const artifact of tempArtifacts) {
-				artifact.delete();
+			for (const artifact of bundleArtifacts) {
+				if (!artifacts.collections.js.has(artifact)) {
+					artifact.delete();
+				}
 			}
 		});
 	},
@@ -91,8 +81,8 @@ const esbuildPlugin: esbuild.Plugin = {
 /** Runs JS/TS bundling */
 export async function bundle(): Promise<void> {
 	const paths = [];
-	for (const artifact of artifacts.collections.bundler) {
-		paths.push(artifact.path);
+	for (const artifact of artifacts.collections.js) {
+		paths.push(artifact.project_path);
 	}
 
 	const result = await esbuild.build({
@@ -124,10 +114,12 @@ export async function bundle(): Promise<void> {
 	for (const output of result.outputFiles) {
 		const static_path = output.path.slice(1);
 		if (static_path !== SENTINEL_PATH) {
-			const artifact = artifacts.create(static_path);
-			artifact.update(output.text);
+			const artifact = new Artifact(static_path);
+			artifact.update(output.contents);
 
-			artifacts.collections.bundler.add(artifact);
+			artifacts.collections.js.add(artifact);
 		}
 	}
+
+	// FIXME: add artifacts as dependencies to each other
 }

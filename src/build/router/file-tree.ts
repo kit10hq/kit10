@@ -9,7 +9,7 @@ export enum WalkSpecificityType {
 	CATCH_ALL = 3,
 }
 type RouteFile = {
-	path: string;
+	absolute_path: string;
 	ext: string;
 };
 export type WalkSpecificity = {
@@ -96,7 +96,7 @@ function walk(path: string, state?: WalkStateDir): WalkStateDir {
 					|| route_def.route_part === 'index'
 				) {
 					state.file = {
-						path: entry_path,
+						absolute_path: entry_path,
 						ext: entrypoint.ext,
 					};
 				} else {
@@ -106,7 +106,7 @@ function walk(path: string, state?: WalkStateDir): WalkStateDir {
 							+ nodePath.sep
 							+ route_def.route_part,
 						file: {
-							path: entry_path,
+							absolute_path: entry_path,
 							ext: entrypoint.ext,
 						},
 						specificity: route_def.specificity,

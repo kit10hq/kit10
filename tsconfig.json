@@ -14,7 +14,7 @@
 		"lib": ["es2024"],
 		"types": ["*"],
 		"declaration": true,
-		"isolatedDeclarations": true
+		"isolatedDeclarations": false
 	},
 	"include": ["src/"],
 	"exclude": ["**/*.test.ts"]

@@ -1,331 +1,300 @@
 import fs from 'node:fs/promises';
 import nodePath from 'node:path';
-import * as buildOptions from '../options.js';
-import { createId } from '../utils.js';
+import { inspect } from 'node:util';
+import { createId, getRelativeProjectPath } from '../utils.js';
+import { createDirectory } from './fs/directory.js';
+import * as buildOptions from './options.js';
 import { applyPlugins } from './plugins.js';
 
-type ArtifactContent = string | Uint8Array;
-type ArtifactOptions = {
-	ext: string;
-	keep_name?: boolean;
-};
+export type ArtifactContent = ConstructorParameters<typeof Blob>[0][number];
 
-export const all: Map<string, Artifact> = new Map<string, Artifact>();
-export const collections: {
-	pre_html: Set<Artifact>;
-	html: Set<Artifact>;
-	bundler: Set<Artifact>;
-} = {
+const all: Map<string, Artifact> = new Map<string, Artifact>();
+export const collections = {
 	pre_html: new Set<Artifact>(),
 	html: new Set<Artifact>(),
-	bundler: new Set<Artifact>(),
+	js: new Set<Artifact>(),
 };
 
-export const dependencies: Map<Artifact, Set<Artifact>> = new Map<
+const dependencies: Map<Artifact, Set<Artifact>> = new Map<
 	Artifact,
 	Set<Artifact>
 >();
-
 const dependents: Map<Artifact, Set<Artifact>> = new Map<
 	Artifact,
 	Set<Artifact>
 >();
 
-/**
- * Links parent artifact to child artifact in dependencies map.
- * @param parent Key artifact.
- * @param child Value artifact.
- */
-function link(parent: Artifact, child: Artifact): void {
-	if (!dependencies.has(parent)) {
-		dependencies.set(parent, new Set<Artifact>());
-	}
-
-	dependencies.get(parent)!.add(child);
-
-	if (!dependents.has(child)) {
-		dependents.set(child, new Set<Artifact>());
-	}
-
-	dependents.get(child)!.add(parent);
-}
-
-const directories = new Set<string>();
-const mkdir_promises: Promise<unknown>[] = [];
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-const SYMBOL: unique symbol = Symbol('Artifact');
+// const SYMBOL: unique symbol = Symbol('Artifact');
 
 export class Artifact {
-	readonly id: string = createId();
-	#path: string;
-	#content: ArtifactContent | null = null;
-	readonly meta: Record<string, unknown> = {};
+	readonly id: string = createId(36);
+	#project_path: string;
+	#content: ArtifactContent[] | null = null;
+	meta: Record<string, unknown> = {};
 
 	constructor(
-		symbol: symbol,
-		arg0: string | Artifact,
-		options?: ArtifactOptions,
+		project_path: string,
+		content?: ArtifactContent | ArtifactContent[],
 	) {
-		if (symbol !== SYMBOL) {
-			throw new Error(
-				'Artifact constructor is private, use createArtifact() instead.',
-			);
+		if (
+			project_path.startsWith('/')
+			|| project_path.startsWith('./')
+			|| project_path.startsWith('../')
+			|| project_path.startsWith('#')
+		) {
+			throw new Error(`Invalid path for artifact: "${project_path}".`);
 		}
 
-		if (typeof arg0 === 'string') {
-			let path = arg0;
-			if (path.startsWith('/') || path.startsWith('.')) {
-				path = nodePath.relative(buildOptions.source_path, path);
-				if (path.startsWith('.')) {
-					throw new Error(`Invalid path for artifact: "${path}".`);
-				}
-			}
+		this.#project_path = project_path;
 
-			this.#path = path;
-		} else {
-			link(arg0, this);
-
-			if (options!.keep_name) {
-				this.#path = arg0.path + '.' + options!.ext;
-			} else {
-				this.#path = arg0.path.includes(nodePath.sep)
-					? nodePath.dirname(arg0.path) + '/'
-					: '';
-				this.#path += `${this.id}.${options!.ext}`;
-			}
+		if (all.has(this.#project_path)) {
+			// oxlint-disable-next-line no-constructor-return
+			return all.get(project_path)!;
 		}
 
-		all.set(this.#path, this);
+		all.set(this.#project_path, this);
 
-		const dir = nodePath.dirname(
-			nodePath.join(buildOptions.output_static_path, this.#path),
-		);
-		if (!directories.has(dir)) {
-			directories.add(dir);
-			mkdir_promises.push(fs.mkdir(dir, { recursive: true }));
+		if (content !== undefined) {
+			this.#content = Array.isArray(content) ? content : [content];
 		}
 	}
 
-	get path(): string {
-		return this.#path;
+	create(content?: ArtifactContent | ArtifactContent[]): Artifact;
+	create(
+		relative_path: string,
+		content?: ArtifactContent | ArtifactContent[],
+	): Artifact;
+	create(
+		arg0: string | ArtifactContent | ArtifactContent[],
+		content?: ArtifactContent | ArtifactContent[],
+	): Artifact {
+		let relative_path: string;
+		// created from real path, file exists
+		if (typeof arg0 === 'string') {
+			relative_path = arg0;
+		}
+		// creating virtual file, so we need to create it empty
+		else {
+			content = arg0 ?? [];
+			relative_path = `${createId()}.tmp`;
+		}
+
+		const project_path = getRelativeProjectPath(
+			this.#project_path,
+			relative_path,
+		);
+
+		const newArtifact = new Artifact(project_path, content);
+		this.link(newArtifact);
+		return newArtifact;
+	}
+
+	/** Adds artifact as a dependency of this artifact. */
+	link(artifact: Artifact): void {
+		if (!dependencies.has(this)) {
+			dependencies.set(this, new Set<Artifact>());
+		}
+
+		dependencies.get(this)!.add(artifact);
+
+		if (!dependents.has(artifact)) {
+			dependents.set(artifact, new Set<Artifact>());
+		}
+
+		dependents.get(artifact)!.add(this);
+	}
+
+	/** Removes artifact as a dependency of this artifact. */
+	unlink(artifact: Artifact): void {
+		dependencies.get(this)?.delete(artifact);
+
+		const childArtifact_dependents = dependents.get(artifact);
+		childArtifact_dependents?.delete(this);
+		if (!childArtifact_dependents || childArtifact_dependents.size === 0) {
+			artifact.delete();
+		}
+	}
+
+	get project_path(): string {
+		return this.#project_path;
 	}
 
 	get absolute_path(): string {
-		return nodePath.join(buildOptions.source_path, this.#path);
+		return nodePath.join(buildOptions.source_path, this.#project_path);
 	}
 
 	get is_page(): boolean {
-		return this.#path.match(/\+page\.[^.]+$/u) !== null;
+		return this.#project_path.match(/\+page\.[^.]+$/u) !== null;
 	}
 
 	get ext(): string {
-		return this.#path.split('.').pop() ?? '';
+		return this.#project_path.split('/').at(-1)!.split('.').at(-1)!;
 	}
 
 	/** Updates the file extension. */
 	updateExt(ext: string): void {
-		all.delete(this.#path);
-		this.#path = this.#path.replace(/\.[^.]+$/u, `.${ext}`);
-		all.set(this.#path, this);
+		all.delete(this.#project_path);
+		this.#project_path = this.#project_path.replace(/\.[^.]+$/u, `.${ext}`);
+		all.set(this.#project_path, this);
 	}
 
-	get is_loaded(): boolean {
-		return this.#content !== null;
+	/** Returns read-only copy of the dependencies of this artifact. */
+	get dependencies(): Set<Artifact> {
+		return new Set(dependencies.get(this));
 	}
 
-	/** Loads the file content from the source. */
-	async load(): Promise<void> {
-		if (typeof this.#content === 'string') {
-			// oxlint-disable-next-line unicorn/prefer-type-error
-			throw new Error(
-				`Artifact "${this.path}" already has content, but source was requested. This can lead to incorrect behavior.`,
+	#load() {
+		if (this.#content === null) {
+			return (
+				fs
+					.readFile(this.absolute_path)
+					// eslint-disable-next-line promise/always-return
+					.then((content) => {
+						this.#content = [content];
+					})
 			);
 		}
-
-		this.#content = await fs.readFile(
-			nodePath.join(buildOptions.source_path, this.path),
-			'utf8',
-		);
 	}
 
-	/** Returns content type. */
-	get type(): 'binary' | 'text' | 'unknown' {
-		if (this.#content instanceof Uint8Array) {
-			return 'binary';
+	#blob_cache: Blob | undefined;
+
+	get #blob(): Blob {
+		if (this.#content === null) {
+			throw new Error(`Content not loaded for ${this.#project_path}.`);
 		}
 
-		if (typeof this.#content === 'string') {
-			return 'text';
+		if (this.#blob_cache === undefined) {
+			this.#blob_cache = new Blob(this.#content);
 		}
 
-		return 'unknown';
+		return this.#blob_cache;
 	}
 
-	/** Returns the file content as a string. */
-	text(): string {
-		if (typeof this.#content === 'string') {
-			return this.#content;
-		}
-
-		if (this.#content instanceof Uint8Array) {
-			return textDecoder.decode(this.#content);
-		}
-
-		throw new Error(`Artifact "${this.path}" not loaded.`);
+	async text(): Promise<string> {
+		await this.#load();
+		return this.#blob.text();
 	}
 
-	/** Returns the file content as a buffer. */
-	buffer(): Uint8Array {
-		if (this.#content instanceof Uint8Array) {
-			return this.#content;
+	async arrayBuffer(): Promise<ArrayBuffer> {
+		await this.#load();
+		return this.#blob.arrayBuffer();
+	}
+
+	async bytes(): Promise<Uint8Array> {
+		await this.#load();
+		return this.#blob.bytes();
+	}
+
+	/** Returns the size of the artifact in bytes. */
+	async size(): Promise<number> {
+		await this.#load();
+		return this.#blob.size;
+	}
+
+	/**
+	 * Returns the size of the artifact in bytes, assuming it has been loaded.
+	 * @throws {Error} If there is no content in memory (file was not read from disk).
+	 */
+	get sizeUnsafe(): number {
+		return this.#blob.size;
+	}
+
+	/** Updates artifact contents, replacing any existing content. */
+	update(data: ArtifactContent | ArtifactContent[]): void {
+		this.#content = Array.isArray(data) ? data : [data];
+		this.#blob_cache = undefined;
+	}
+
+	/** Appends to the artifact contents. */
+	append(data: ArtifactContent): void {
+		if (this.#content === null) {
+			throw new Error(`Content not loaded for ${this.#project_path}.`);
 		}
 
-		if (typeof this.#content === 'string') {
-			return textEncoder.encode(this.#content);
-		}
-
-		throw new Error(`Artifact "${this.path}" not loaded.`);
+		this.#content.push(data);
+		this.#blob_cache = undefined;
 	}
 
-	/** Updates temporary file content. */
-	update(content: ArtifactContent): void {
-		this.#content = content;
+	/** Processes the artifact with user defined plugins. */
+	async process(): Promise<void> {
+		await applyPlugins([this]);
 	}
 
-	/** Appends content to the temporary file. */
-	append(content: string): void {
-		if (typeof this.#content !== 'string') {
-			throw new TypeError(
-				`Cannot append to artifact "${this.path}" with buffer content inside.`,
-			);
-		}
-
-		this.#content = (this.#content ?? '') + content;
-	}
-
-	/** Links this artifact to another artifact. */
-	link(artifact: Artifact): void {
-		link(this, artifact);
-	}
-
-	/** Deletes the temporary file. */
+	/** Deletes the artifact from build context. */
 	delete(): void {
-		this.#content = null;
+		all.delete(this.#project_path);
 
-		const artifact_dependents = dependents.get(this);
-		if (artifact_dependents) {
-			for (const artifact of artifact_dependents) {
-				dependencies.get(artifact)?.delete(this);
+		const thisArtifact_dependents = dependents.get(this);
+		if (thisArtifact_dependents) {
+			for (const dependentArtifact of thisArtifact_dependents) {
+				dependencies.get(dependentArtifact)?.delete(this);
 			}
 		}
 
-		const artifact_dependencies = dependencies.get(this);
-		if (artifact_dependencies) {
-			for (const artifact of artifact_dependencies) {
-				artifact.delete();
+		const thisAartifact_dependencies = dependencies.get(this);
+		if (thisAartifact_dependencies) {
+			for (const dependencyArtifact of thisAartifact_dependencies) {
+				this.unlink(dependencyArtifact);
 			}
 		}
 
 		dependents.delete(this);
 		dependencies.delete(this);
 
-		all.delete(this.path);
-	}
-
-	/** Creates dependency artifact. */
-	create(content: ArtifactContent, options: ArtifactOptions): Artifact {
-		const artifact = new Artifact(SYMBOL, this, options);
-		artifact.update(content);
-
-		return artifact;
-	}
-
-	/** Processes the artifact. */
-	async process(): Promise<void> {
-		await applyPlugins([this], buildOptions.config.plugins);
-	}
-}
-
-/**
- * Returns whether the given path has a temporary content.
- * @param path - The path to check.
- */
-export function isArtifactAt(path: string): boolean {
-	return typeof all.get(path)?.text() === 'string';
-}
-
-/**
- * Creates or retrieves an Artifact for the given path.
- * @param path - The path of the artifact.
- * @returns -
- */
-export function create(path: string): Artifact {
-	let artifact = all.get(path);
-	if (artifact === undefined) {
-		artifact = new Artifact(SYMBOL, path);
-	}
-
-	return artifact;
-}
-
-/** Logs artifacts. */
-export function print(): void {
-	// oxlint-disable-next-line no-console
-	console.log(`${all.size} artifacts:`);
-
-	const info = [];
-	for (const artifact of all.values()) {
-		if (artifact.meta.noout === true) {
-			continue;
+		for (const collection of Object.values(collections)) {
+			collection.delete(this);
 		}
-
-		info.push({
-			filename: artifact.path,
-			size: String(
-				artifact.type === 'text'
-					? artifact.text().length
-					: artifact.type === 'binary'
-						? artifact.buffer().length
-						: '?',
-			).padStart(6),
-			// dependency: artifact.is_dependency ? '✓' : '',
-		});
 	}
 
-	// oxlint-disable-next-line no-console
-	console.table(info.toSorted((a, b) => a.filename.localeCompare(b.filename)));
+	toString(): string {
+		return [
+			`Artifact(${this.#project_path}) {`,
+			`  id: ${this.id}`,
+			`  content: <${this.#content ? `${this.#blob.size} bytes` : 'not loaded'}>`,
+			`}`,
+		].join('\n');
+	}
+
+	[inspect.custom](): string {
+		return this.toString();
+	}
 }
 
-/** Writes all temporary files to disk. */
-export async function flush(): Promise<void> {
-	await Promise.all(mkdir_promises);
+/** List of already flushed artifacts by their project paths. */
+const flushed = new Set<string>();
+
+/** Writes a single artifact to disk. */
+async function flushOne(artifact: Artifact) {
+	if (flushed.has(artifact.project_path)) {
+		return;
+	}
+
+	const file_path = nodePath.join(
+		buildOptions.output_static_path,
+		artifact.project_path,
+	);
+
+	await createDirectory(nodePath.dirname(artifact.project_path));
+
+	const contents = await artifact.bytes();
+	await fs.writeFile(file_path, contents);
+
+	flushed.add(artifact.project_path);
 
 	const promises = [];
-	for (const artifact of all.values()) {
-		if (artifact.meta.noout === true) {
-			continue;
-		}
+	for (const dependencyArtifact of artifact.dependencies) {
+		promises.push(flushOne(dependencyArtifact));
+	}
 
-		const output_file_path = nodePath.join(
-			buildOptions.output_static_path,
-			artifact.path,
-		);
+	await Promise.all(promises);
+}
 
-		let promise;
-		if (artifact.is_loaded) {
-			promise = fs.writeFile(output_file_path, artifact.buffer());
-		} else {
-			const source_file_path = nodePath.join(
-				buildOptions.source_path,
-				artifact.path,
-			);
-			promise = fs.cp(source_file_path, output_file_path);
-		}
-
-		promises.push(promise);
+/** Writes all artifacts to disk. */
+export async function flush(): Promise<void> {
+	const promises = [];
+	// for (const artifact of all.values()) {
+	for (const artifact of collections.html.values()) {
+		promises.push(flushOne(artifact));
 	}
 
 	await Promise.all(promises);

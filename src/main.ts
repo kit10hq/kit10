@@ -2,7 +2,7 @@
 
 // oxlint-disable unicorn/no-process-exit
 
-import { output_path } from './options.js';
+import { output_path } from './build/options.js';
 
 const command = process.argv[2];
 if (command === 'dev' || command === 'build') {
@@ -17,6 +17,6 @@ if (command === 'dev' || command === 'build') {
 	process.exit(1);
 }
 
-export type { Artifact } from './build/artifact.js';
+export type { Config } from './build/options.js';
+// export type { Artifact } from './build/artifact.js';
 export type { Plugin } from './build/plugins.js';
-export type { Config } from './options.js';

@@ -10,7 +10,7 @@ test-d/
 # ignore configs
 .luarc.json
 .oxlintrc.json
-biome.json
+# biome.json # we use it to format dev builds
 bunfig.toml
 # these names cannot be declared using {js,mjs,cjs} syntax
 # is this case rule n/no-unpublished-import yells at me

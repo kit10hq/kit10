@@ -1,64 +1,59 @@
 // oxlint-disable unicorn/no-process-exit
 
+// import { gzipPlugin } from './build/plugins/gzip.js';
+// import {
+// 	htmlScanImportsPlugin,
+// 	htmlWriteImportsPlugin,
+// } from './build/plugins/html/imports.js';
+// import { minifyHtmlPlugin } from './build/plugins/html/minify.js';
+// import { htmlTemplatePlugin } from './build/plugins/html/template.js';
+// import { applyPlugins } from './build/plugins.js';
 import * as artifacts from './build/artifact.js';
 import { bundle } from './build/bundler.js';
-import { gzipPlugin } from './build/plugins/gzip.js';
-import {
-	htmlScanImportsPlugin,
-	htmlWriteImportsPlugin,
-} from './build/plugins/html/imports.js';
-import { minifyHtmlPlugin } from './build/plugins/html/minify.js';
-// import { htmlTemplatePlugin } from './build/plugins/html/template.js';
-import { applyPlugins } from './build/plugins.js';
-import { flushRouter, parseEntrypoints } from './build/router.js';
-import * as buildOptions from './options.js';
+import { formatOutput } from './build/formatter.js';
+import { templateArtifact } from './build/html/template.js';
+import { compileToHtml, finalizeHtml, processHtml } from './build/html.js';
+import * as buildOptions from './build/options.js';
+import { flushRouter, processEntrypoints } from './build/router.js';
 
 const start = process.hrtime.bigint();
 
 // find all entrypoint files, build routes
-await parseEntrypoints();
+processEntrypoints();
 
 // compile all artifacts to HTML by plugins
-await applyPlugins(artifacts.collections.pre_html, buildOptions.config.plugins);
+await compileToHtml();
 
-// check all entrypoint artifacts have been compiled to HTML
-for (const artifact of artifacts.collections.pre_html) {
-	if (artifact.ext !== 'html') {
-		// oxlint-disable-next-line no-console
-		console.error(
-			`No plugin found for ".${artifact.ext}" pages (for "${artifact.path}").`,
-		);
-		process.exit(1);
-	}
+// find dependencies, wrap pages into +template.html, ...
+await processHtml();
 
-	artifacts.collections.html.add(artifact);
+console.log('script artifacts:');
+for (const artifact of artifacts.collections.js) {
+	console.log('----------', '[', artifact.project_path, ']', '----------');
+	// oxlint-disable-next-line no-await-in-loop
+	console.log(await artifact.text());
 }
 
-artifacts.collections.pre_html.clear();
-
-await applyPlugins(artifacts.collections.html.values(), [
-	// htmlTemplatePlugin,
-	htmlScanImportsPlugin,
-]);
+console.log('----------');
 
 await bundle();
 
-await applyPlugins(
-	artifacts.collections.bundler.values(),
-	buildOptions.config.plugins,
-);
+// TODO: apply plugins on non-js/css artifacts
 
-await applyPlugins(artifacts.collections.html.values(), [
-	htmlWriteImportsPlugin,
-	minifyHtmlPlugin,
-]);
+await finalizeHtml();
+templateArtifact.delete();
+// TODO: minify html
 
-await applyPlugins(artifacts.all.values(), [gzipPlugin]);
+// TODO: gzip
 
-artifacts.print();
+// artifacts.print();
 
 await flushRouter();
 await artifacts.flush();
+
+if (!buildOptions.is_prod) {
+	await formatOutput();
+}
 
 /**
  * Format nanoseconds as a human-readable string.
