@@ -401,7 +401,8 @@ function processMetafile(esbuild_options, metafile) {
 	const output_prefix = nodePath.relative(esbuild_options.absWorkingDir, esbuild_options.outdir) + "/";
 	const output_entrypoint_prefix = `artifact:${esbuild_options.absWorkingDir}/`;
 	for (const [output_path, output] of Object.entries(metafile.outputs)) {
-		if (output_path.includes(SENTINEL_PATH)) continue;
+		console.log("[processMetafile]", "output_path", output_path);
+		if (output_path.includes(SENTINEL_PATH) || output_path.startsWith("data:")) continue;
 		if (!output_path.startsWith(output_prefix)) throw new Error(`Esbuild output "${output_path}" does not start with "${output_prefix}".`);
 		const output_project_path = output_path.slice(output_prefix.length);
 		let project_path;
@@ -412,7 +413,7 @@ function processMetafile(esbuild_options, metafile) {
 		}
 		result.set(output_project_path, {
 			project_path,
-			imports: output.imports.map((import_) => {
+			imports: output.imports.filter((import_) => !import_.path.startsWith("data:")).map((import_) => {
 				if (!import_.path.startsWith(output_prefix)) throw new Error(`Esbuild output import "${import_.path}" does not start with "${output_prefix}".`);
 				return import_.path.slice(output_prefix.length);
 			})

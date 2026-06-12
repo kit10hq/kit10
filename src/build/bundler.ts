@@ -213,7 +213,10 @@ function processMetafile(
 	const output_entrypoint_prefix = `artifact:${esbuild_options.absWorkingDir}/`;
 
 	for (const [output_path, output] of Object.entries(metafile.outputs)) {
-		if (output_path.includes(SENTINEL_PATH)) {
+		if (
+			output_path.includes(SENTINEL_PATH)
+			|| output_path.startsWith('data:')
+		) {
 			continue;
 		}
 
@@ -247,15 +250,17 @@ function processMetafile(
 
 		result.set(output_project_path, {
 			project_path,
-			imports: output.imports.map((import_) => {
-				if (!import_.path.startsWith(output_prefix)) {
-					throw new Error(
-						`Esbuild output import "${import_.path}" does not start with "${output_prefix}".`,
-					);
-				}
+			imports: output.imports
+				.filter((import_) => !import_.path.startsWith('data:'))
+				.map((import_) => {
+					if (!import_.path.startsWith(output_prefix)) {
+						throw new Error(
+							`Esbuild output import "${import_.path}" does not start with "${output_prefix}".`,
+						);
+					}
 
-				return import_.path.slice(output_prefix.length);
-			}),
+					return import_.path.slice(output_prefix.length);
+				}),
 		});
 	}
 
