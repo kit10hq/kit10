@@ -1,22 +1,18 @@
 // oxlint-disable unicorn/no-process-exit
 
-// import { gzipPlugin } from './build/plugins/gzip.js';
-// import {
-// 	htmlScanImportsPlugin,
-// 	htmlWriteImportsPlugin,
-// } from './build/plugins/html/imports.js';
-// import { minifyHtmlPlugin } from './build/plugins/html/minify.js';
-// import { htmlTemplatePlugin } from './build/plugins/html/template.js';
-// import { applyPlugins } from './build/plugins.js';
 import * as artifacts from './build/artifact.js';
 import { bundle } from './build/bundler.js';
 import { formatOutput } from './build/formatter.js';
+import { clearDistDirectory } from './build/fs/directory.js';
 import { templateArtifact } from './build/html/template.js';
 import { compileToHtml, finalizeHtml, processHtml } from './build/html.js';
 import * as buildOptions from './build/options.js';
 import { flushRouter, processEntrypoints } from './build/router.js';
 
 const start = process.hrtime.bigint();
+
+// Clear dist directory
+await clearDistDirectory();
 
 // find all entrypoint files, build routes
 processEntrypoints();
@@ -27,18 +23,8 @@ await compileToHtml();
 // find dependencies, wrap pages into +template.html, ...
 await processHtml();
 
-// console.log('script artifacts:');
-// for (const artifact of artifacts.collections.js) {
-// 	console.log('----------', '[', artifact.project_path, ']', '----------');
-// 	// oxlint-disable-next-line no-await-in-loop
-// 	console.log(await artifact.text());
-// }
-
-// console.log('----------');
-
+// use esbuild to bundle js/css and other files
 await bundle();
-
-// TODO: apply plugins on non-js/css artifacts
 
 await finalizeHtml();
 templateArtifact.delete();

@@ -48,6 +48,13 @@ function createDirectory(project_dir) {
 	});
 	return promise;
 }
+/** Clear the dist directory. */
+async function clearDistDirectory() {
+	const entries = await fs$1.readdir(output_path, { withFileTypes: true });
+	const promises = [];
+	for (const entry of entries) promises.push(fs$1.rm(nodePath.join(output_path, entry.name), { recursive: true }));
+	await Promise.all(promises);
+}
 //#endregion
 //#region src/build/utils.ts
 const tsconfig = getTsconfig(project_path);
@@ -249,16 +256,13 @@ const targets = browserslistToTargets(browserslist(">= 0.25%"));
 const cssPlugin = {
 	filter: /\.css$/u,
 	async transform(artifact, options) {
-		if (options.is_prod) {
-			console.log(">>>>>> [CSS PLUGIN]", artifact.project_path);
-			const code = await artifact.bytes();
-			artifact.update(transform({
-				filename: artifact.absolute_path,
-				code,
-				targets,
-				minify: true
-			}).code);
-		}
+		const code = await artifact.bytes();
+		artifact.update(transform({
+			filename: artifact.absolute_path,
+			code,
+			targets,
+			minify: options.is_prod
+		}).code);
 	}
 };
 //#endregion
@@ -509,6 +513,22 @@ async function parseHtml(artifact) {
 			styleArtifact.update(tag_content);
 		});
 		collections.bundle.add(styleArtifact);
+	} });
+	rewriter.on("link", { element(element) {
+		const attr_href = element.getAttribute("href");
+		if (attr_href === null) return;
+		const attributes = new Map(element.attributes);
+		attributes.delete("kit10:inline");
+		attributes.delete("href");
+		if (element.getAttribute("rel") === "stylesheet" || element.getAttribute("rel") === "preload" && element.getAttribute("as") === "style") {
+			const linkArtifact = artifact.create(getRelativeProjectPath(artifact.project_path, attr_href));
+			element.replace(`<!--${linkArtifact.id}-->`, { html: true });
+			linkArtifact.meta.style = {
+				inline: element.getAttribute("kit10:inline") !== null,
+				attributes
+			};
+			collections.bundle.add(linkArtifact);
+		}
 	} });
 	rewriter.on("head", { element(element) {
 		element.append(HEAD_PLACEHOLDER, { html: true });
@@ -820,6 +840,7 @@ async function flushRouter() {
 //#endregion
 //#region src/build.ts
 const start = process.hrtime.bigint();
+await clearDistDirectory();
 processEntrypoints();
 await compileToHtml();
 await processHtml();

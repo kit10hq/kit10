@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { createPathsMatcher, getTsconfig } from 'get-tsconfig';
 import * as buildOptions from './options.js';

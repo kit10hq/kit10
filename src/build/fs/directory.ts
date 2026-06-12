@@ -72,3 +72,21 @@ export function createDirectory(
 
 	return promise;
 }
+
+/** Clear the dist directory. */
+export async function clearDistDirectory(): Promise<void> {
+	const entries = await fs.readdir(buildOptions.output_path, {
+		withFileTypes: true,
+	});
+	const promises = [];
+
+	for (const entry of entries) {
+		promises.push(
+			fs.rm(nodePath.join(buildOptions.output_path, entry.name), {
+				recursive: true,
+			}),
+		);
+	}
+
+	await Promise.all(promises);
+}

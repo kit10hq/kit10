@@ -59,7 +59,7 @@ export class Artifact {
 		}
 	}
 
-	create(project_path: string): Artifact;
+	create(relative_path: string): Artifact;
 	create(options: {
 		ext: string;
 		content?: ArtifactContent | ArtifactContent[];

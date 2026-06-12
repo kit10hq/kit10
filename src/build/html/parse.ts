@@ -139,29 +139,36 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 		},
 	});
 
-	// rewriter.on('link', {
-	// 	element(element) {
-	// 		if (
-	// 			element.getAttribute('rel') === 'stylesheet'
-	// 			|| (element.getAttribute('rel') === 'preload'
-	// 				&& element.getAttribute('as') === 'style')
-	// 		) {
-	// 			const path = element.getAttribute('href');
-	// 			if (path !== null) {
-	// 				const linkArtifact = artifacts.create(
-	// 					nodePath.join(nodePath.dirname(artifact.path), path),
-	// 				);
-	// 				linkArtifact.meta.html_type = 'link';
+	rewriter.on('link', {
+		element(element) {
+			const attr_href = element.getAttribute('href');
+			if (attr_href === null) {
+				return;
+			}
 
-	// 				artifact.link(linkArtifact);
+			const attributes = new Map(element.attributes);
+			attributes.delete('kit10:inline');
+			attributes.delete('href');
 
-	// 				promises.push(linkArtifact.load().then(() => linkArtifact.process()));
+			if (
+				element.getAttribute('rel') === 'stylesheet'
+				|| (element.getAttribute('rel') === 'preload'
+					&& element.getAttribute('as') === 'style')
+			) {
+				const linkArtifact = artifact.create(
+					getRelativeProjectPath(artifact.project_path, attr_href),
+				);
 
-	// 				element.setAttribute('href', linkArtifact.id);
-	// 			}
-	// 		}
-	// 	},
-	// });
+				element.replace(`<!--${linkArtifact.id}-->`, { html: true });
+				linkArtifact.meta.style = {
+					inline: element.getAttribute('kit10:inline') !== null,
+					attributes,
+				} satisfies ElementMetadata;
+
+				artifacts.collections.bundle.add(linkArtifact);
+			}
+		},
+	});
 
 	rewriter.on('head', {
 		element(element) {

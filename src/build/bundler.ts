@@ -186,7 +186,6 @@ export async function bundle(): Promise<void> {
 		artifacts.collections.bundle.add(artifact);
 	}
 
-	// FIXME: add artifacts as dependencies to each other
 	for (const [project_path, { imports }] of metafile) {
 		const artifact = new Artifact(project_path);
 

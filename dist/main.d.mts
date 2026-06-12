@@ -7,7 +7,7 @@ declare class Artifact {
   readonly id: string;
   meta: Record<string, unknown>;
   constructor(project_path: string, content?: ArtifactContent | ArtifactContent[]);
-  create(project_path: string): Artifact;
+  create(relative_path: string): Artifact;
   create(options: {
     ext: string;
     content?: ArtifactContent | ArtifactContent[];
