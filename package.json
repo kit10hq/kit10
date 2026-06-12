@@ -16,6 +16,7 @@
 		"@minify-html/node": "0.18.1",
 		"browserslist": "4.28.2",
 		"esbuild": "0.28.0",
+		"get-tsconfig": "4.14.0",
 		"html-rewriter-wasm": "0.4.1",
 		"lightningcss": "1.32.0",
 		"nanoid": "5.1.11"
@@ -35,10 +36,9 @@
 	},
 	"scripts": {
 		"build": "tsdown src/main.ts --unused --dts --format esm",
-		"check": "bun run lint && bun run build && bun run test",
+		"check": "bun run lint && bun run build",
 		"lint": "biome format && oxlint && eslint . && tsc",
-		"pack": "bun run check && dev pack create",
-		"test": "echo 'No tests specified'"
+		"pack": "bun run check && dev pack create"
 	},
 	"repository": {
 		"type": "git",

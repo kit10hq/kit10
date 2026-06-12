@@ -5,6 +5,8 @@ import * as buildOptions from '../options.js';
 const directories_created = new Set<string>();
 const directories_creating = new Map<string, Promise<unknown>>();
 
+await fs.mkdir(buildOptions.output_static_path, { recursive: true });
+
 /** Returns all directories containing given path. */
 function getDirectories(project_dir: string): Set<string> {
 	const result = new Set<string>();

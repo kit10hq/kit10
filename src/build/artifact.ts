@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { inspect } from 'node:util';
-import { createId, getRelativeProjectPath } from '../utils.js';
+import { createId } from '../utils.js';
 import { createDirectory } from './fs/directory.js';
 import * as buildOptions from './options.js';
-import { applyPlugins } from './plugins.js';
+import { getRelativeProjectPath } from './utils.js';
 
 export type ArtifactContent = ConstructorParameters<typeof Blob>[0][number];
 
@@ -12,7 +12,7 @@ const all: Map<string, Artifact> = new Map<string, Artifact>();
 export const collections = {
 	pre_html: new Set<Artifact>(),
 	html: new Set<Artifact>(),
-	js: new Set<Artifact>(),
+	bundle: new Set<Artifact>(),
 };
 
 const dependencies: Map<Artifact, Set<Artifact>> = new Map<
@@ -59,29 +59,34 @@ export class Artifact {
 		}
 	}
 
-	create(content?: ArtifactContent | ArtifactContent[]): Artifact;
+	create(project_path: string): Artifact;
+	create(options: {
+		ext: string;
+		content?: ArtifactContent | ArtifactContent[];
+	}): Artifact;
 	create(
-		relative_path: string,
-		content?: ArtifactContent | ArtifactContent[],
-	): Artifact;
-	create(
-		arg0: string | ArtifactContent | ArtifactContent[],
-		content?: ArtifactContent | ArtifactContent[],
+		arg0:
+			| string
+			| {
+					ext: string;
+					content?: ArtifactContent | ArtifactContent[];
+			  },
 	): Artifact {
 		let relative_path: string;
-		// created from real path, file exists
+		let content: ArtifactContent | ArtifactContent[] | undefined;
 		if (typeof arg0 === 'string') {
 			relative_path = arg0;
-		}
-		// creating virtual file, so we need to create it empty
-		else {
-			content = arg0 ?? [];
-			relative_path = `${createId()}.tmp`;
+		} else {
+			relative_path = this.filename.replace(
+				/\.[^.]+$/u,
+				`-${createId()}.${arg0.ext}`,
+			);
+			content = arg0.content ?? [];
 		}
 
 		const project_path = getRelativeProjectPath(
 			this.#project_path,
-			relative_path,
+			'./' + relative_path,
 		);
 
 		const newArtifact = new Artifact(project_path, content);
@@ -121,6 +126,23 @@ export class Artifact {
 
 	get absolute_path(): string {
 		return nodePath.join(buildOptions.source_path, this.#project_path);
+	}
+
+	get filename(): string {
+		return this.#project_path.split(nodePath.sep).at(-1)!;
+	}
+
+	updateFilename(filename: string): void {
+		if (filename.includes(nodePath.sep)) {
+			throw new Error(`filename must not include path separators: ${filename}`);
+		}
+
+		all.delete(this.#project_path);
+		this.#project_path = this.#project_path.replace(
+			/\/[^/]+$/u,
+			`/${filename}`,
+		);
+		all.set(this.#project_path, this);
 	}
 
 	get is_page(): boolean {
@@ -215,11 +237,6 @@ export class Artifact {
 		this.#blob_cache = undefined;
 	}
 
-	/** Processes the artifact with user defined plugins. */
-	async process(): Promise<void> {
-		await applyPlugins([this]);
-	}
-
 	/** Deletes the artifact from build context. */
 	delete(): void {
 		all.delete(this.#project_path);
@@ -246,6 +263,32 @@ export class Artifact {
 		}
 	}
 
+	#is_flushed = false;
+
+	/** Writes the artifact to disk. */
+	async flush(): Promise<void> {
+		if (this.#is_flushed) {
+			console.log('[Artifact#flush] already flushed', this.project_path);
+			return;
+		}
+
+		console.log('[Artifact#flush] flushing', this.project_path, '...');
+
+		this.#is_flushed = true;
+
+		const output_path = nodePath.join(
+			buildOptions.output_static_path,
+			this.#project_path,
+		);
+
+		if (this.#content === null) {
+			await fs.cp(this.absolute_path, output_path);
+		} else {
+			const contents = await this.bytes();
+			await fs.writeFile(output_path, contents);
+		}
+	}
+
 	toString(): string {
 		return [
 			`Artifact(${this.#project_path}) {`,
@@ -260,28 +303,11 @@ export class Artifact {
 	}
 }
 
-/** List of already flushed artifacts by their project paths. */
-const flushed = new Set<string>();
-
 /** Writes a single artifact to disk. */
 async function flushOne(artifact: Artifact) {
-	if (flushed.has(artifact.project_path)) {
-		return;
-	}
-
-	const file_path = nodePath.join(
-		buildOptions.output_static_path,
-		artifact.project_path,
-	);
-
 	await createDirectory(nodePath.dirname(artifact.project_path));
 
-	const contents = await artifact.bytes();
-	await fs.writeFile(file_path, contents);
-
-	flushed.add(artifact.project_path);
-
-	const promises = [];
+	const promises = [artifact.flush()];
 	for (const dependencyArtifact of artifact.dependencies) {
 		promises.push(flushOne(dependencyArtifact));
 	}

@@ -1,26 +1,18 @@
-import { a as source_path, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-BeMMLdZn.mjs";
+import { a as project_path, i as output_static_path, n as is_prod, o as source_path, r as output_path, t as config } from "./options-CUPAJ8kq.mjs";
 import nodePath from "node:path";
 import * as fs$1 from "node:fs/promises";
 import fs from "node:fs/promises";
 import { inspect } from "node:util";
 import { customAlphabet } from "nanoid";
+import { createPathsMatcher, getTsconfig } from "get-tsconfig";
 import * as esbuild from "esbuild";
+import browserslist from "browserslist";
+import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
 import { readdirSync } from "node:fs";
 //#region src/utils.ts
 const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
 customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
-/** Checks if path points to a file in the project. */
-function isLocalPath(path) {
-	if (path.startsWith("//")) return false;
-	if (new URL(path, "file://").protocol !== "file:") return false;
-	return true;
-}
-/** Returns the path to a file imported from another file. */
-function getRelativeProjectPath(project_path, relative_path) {
-	if (!isLocalPath(relative_path)) throw new Error(`Can not resolve non-local path: ${relative_path}`);
-	return relative_path.startsWith("/") ? relative_path.slice(1) : nodePath.join(nodePath.dirname(project_path), relative_path);
-}
 /** Returns a safe value for an HTML attribute. */
 function escapeAttributeValue(value) {
 	return value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -29,6 +21,7 @@ function escapeAttributeValue(value) {
 //#region src/build/fs/directory.ts
 const directories_created = /* @__PURE__ */ new Set();
 const directories_creating = /* @__PURE__ */ new Map();
+await fs$1.mkdir(output_static_path, { recursive: true });
 /** Returns all directories containing given path. */
 function getDirectories(project_dir) {
 	const result = /* @__PURE__ */ new Set();
@@ -56,26 +49,22 @@ function createDirectory(project_dir) {
 	return promise;
 }
 //#endregion
-//#region src/build/plugins.ts
-/** Applies the plugins from the config. */
-async function applyPlugins(artifacts) {
-	if (!config.plugins) return;
-	const artifacts_set = artifacts instanceof Set ? artifacts : new Set(artifacts);
-	for (const plugin of config.plugins) {
-		const promises = [];
-		for (const artifact of artifacts_set) if (plugin.filter === "*" || plugin.filter.test(artifact.project_path)) {
-			const result = plugin.transform(artifact, {
-				source_path,
-				is_prod
-			});
-			if (result instanceof Promise) promises.push(result);
-		}
-		if (promises.length > 0) await Promise.all(promises);
-		if (plugin.end) {
-			const result = plugin.end();
-			if (result instanceof Promise) await result;
-		}
-	}
+//#region src/build/utils.ts
+const tsconfig = getTsconfig(project_path);
+const matchPath = tsconfig ? createPathsMatcher(tsconfig) : void 0;
+/** Checks if path points to a file in the project. */
+function isFileImportSpecifier(specifier) {
+	if (specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/") || /^[a-z]:[\\/]/iu.test(specifier)) return true;
+	if (specifier.startsWith("file:")) return true;
+	if (/^[a-z][a-z\d+.-]*:/iu.test(specifier)) return false;
+	if (specifier.startsWith("#")) return false;
+	if (matchPath?.(specifier)?.length) return true;
+	return false;
+}
+/** Returns the path to a file imported from another file. */
+function getRelativeProjectPath(project_path, relative_path) {
+	if (!isFileImportSpecifier(relative_path)) throw new Error(`Can not resolve non-local path: ${relative_path}`);
+	return relative_path.startsWith("/") ? relative_path.slice(1) : nodePath.join(nodePath.dirname(project_path), relative_path);
 }
 //#endregion
 //#region src/build/artifact.ts
@@ -83,7 +72,7 @@ const all = /* @__PURE__ */ new Map();
 const collections = {
 	pre_html: /* @__PURE__ */ new Set(),
 	html: /* @__PURE__ */ new Set(),
-	js: /* @__PURE__ */ new Set()
+	bundle: /* @__PURE__ */ new Set()
 };
 const dependencies = /* @__PURE__ */ new Map();
 const dependents = /* @__PURE__ */ new Map();
@@ -99,14 +88,15 @@ var Artifact = class Artifact {
 		all.set(this.#project_path, this);
 		if (content !== void 0) this.#content = Array.isArray(content) ? content : [content];
 	}
-	create(arg0, content) {
+	create(arg0) {
 		let relative_path;
+		let content;
 		if (typeof arg0 === "string") relative_path = arg0;
 		else {
-			content = arg0 ?? [];
-			relative_path = `${createId()}.tmp`;
+			relative_path = this.filename.replace(/\.[^.]+$/u, `-${createId()}.${arg0.ext}`);
+			content = arg0.content ?? [];
 		}
-		const newArtifact = new Artifact(getRelativeProjectPath(this.#project_path, relative_path), content);
+		const newArtifact = new Artifact(getRelativeProjectPath(this.#project_path, "./" + relative_path), content);
 		this.link(newArtifact);
 		return newArtifact;
 	}
@@ -129,6 +119,15 @@ var Artifact = class Artifact {
 	}
 	get absolute_path() {
 		return nodePath.join(source_path, this.#project_path);
+	}
+	get filename() {
+		return this.#project_path.split(nodePath.sep).at(-1);
+	}
+	updateFilename(filename) {
+		if (filename.includes(nodePath.sep)) throw new Error(`filename must not include path separators: ${filename}`);
+		all.delete(this.#project_path);
+		this.#project_path = this.#project_path.replace(/\/[^/]+$/u, `/${filename}`);
+		all.set(this.#project_path, this);
 	}
 	get is_page() {
 		return this.#project_path.match(/\+page\.[^.]+$/u) !== null;
@@ -192,10 +191,6 @@ var Artifact = class Artifact {
 		this.#content.push(data);
 		this.#blob_cache = void 0;
 	}
-	/** Processes the artifact with user defined plugins. */
-	async process() {
-		await applyPlugins([this]);
-	}
 	/** Deletes the artifact from build context. */
 	delete() {
 		all.delete(this.#project_path);
@@ -206,6 +201,22 @@ var Artifact = class Artifact {
 		dependents.delete(this);
 		dependencies.delete(this);
 		for (const collection of Object.values(collections)) collection.delete(this);
+	}
+	#is_flushed = false;
+	/** Writes the artifact to disk. */
+	async flush() {
+		if (this.#is_flushed) {
+			console.log("[Artifact#flush] already flushed", this.project_path);
+			return;
+		}
+		console.log("[Artifact#flush] flushing", this.project_path, "...");
+		this.#is_flushed = true;
+		const output_path = nodePath.join(output_static_path, this.#project_path);
+		if (this.#content === null) await fs.cp(this.absolute_path, output_path);
+		else {
+			const contents = await this.bytes();
+			await fs.writeFile(output_path, contents);
+		}
 	}
 	toString() {
 		return [
@@ -219,17 +230,10 @@ var Artifact = class Artifact {
 		return this.toString();
 	}
 };
-/** List of already flushed artifacts by their project paths. */
-const flushed = /* @__PURE__ */ new Set();
 /** Writes a single artifact to disk. */
 async function flushOne(artifact) {
-	if (flushed.has(artifact.project_path)) return;
-	const file_path = nodePath.join(output_static_path, artifact.project_path);
 	await createDirectory(nodePath.dirname(artifact.project_path));
-	const contents = await artifact.bytes();
-	await fs.writeFile(file_path, contents);
-	flushed.add(artifact.project_path);
-	const promises = [];
+	const promises = [artifact.flush()];
 	for (const dependencyArtifact of artifact.dependencies) promises.push(flushOne(dependencyArtifact));
 	await Promise.all(promises);
 }
@@ -240,88 +244,177 @@ async function flush() {
 	await Promise.all(promises);
 }
 //#endregion
+//#region src/build/plugins/css.ts
+const targets = browserslistToTargets(browserslist(">= 0.25%"));
+const cssPlugin = {
+	filter: /\.css$/u,
+	async transform(artifact, options) {
+		if (options.is_prod) {
+			console.log(">>>>>> [CSS PLUGIN]", artifact.project_path);
+			const code = await artifact.bytes();
+			artifact.update(transform({
+				filename: artifact.absolute_path,
+				code,
+				targets,
+				minify: true
+			}).code);
+		}
+	}
+};
+//#endregion
+//#region src/build/plugins.ts
+const plugins = config.plugins ?? [];
+plugins.push(cssPlugin);
+/** Applies the plugins from the config. */
+async function applyPlugins(artifacts) {
+	const artifacts_set = artifacts instanceof Set ? artifacts : new Set(artifacts);
+	for (const plugin of plugins) {
+		const promises = [];
+		for (const artifact of artifacts_set) if (plugin.filter === "*" || (plugin.filter.lastIndex = 0, plugin.filter.test(artifact.project_path))) {
+			const result = plugin.transform(artifact, {
+				source_path,
+				is_prod
+			});
+			if (result instanceof Promise) promises.push(result);
+		}
+		if (promises.length > 0) await Promise.all(promises);
+		if (plugin.end) {
+			const result = plugin.end();
+			if (result instanceof Promise) await result;
+		}
+	}
+}
+//#endregion
 //#region src/build/bundler.ts
 const SENTINEL_PATH = `${createId()}.js`;
-const JS_EXTS = new Set([
-	"mjs",
-	"cjs",
-	"ts",
-	"mts",
-	"cts"
-]);
-const KNOWN_EXTS = new Set([
-	"js",
-	...JS_EXTS,
-	"json"
-]);
+/** Returns esbuild loader by onLoad args. */
+function getLoaderByOnLoadArgs(args) {
+	switch (args.with.type) {
+		case "json": return "json";
+		case "text": return "text";
+		case "bytes": return "binary";
+	}
+}
+/** Returns esbuild loader for the given path. */
+function getLoaderByFilePath(path) {
+	switch (path.split(".").at(-1)) {
+		case "js":
+		case "mjs":
+		case "cjs": return "js";
+		case "ts":
+		case "mts":
+		case "cts": return "ts";
+		case "json": return "json";
+		case "css": return "css";
+		case "txt": return "text";
+	}
+}
 const esbuildPlugin = {
 	name: "kit10",
 	setup(build) {
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (isLocalPath(args.path)) return {
-				path: args.path,
+			if (isFileImportSpecifier(args.path)) return {
+				path: args.importer.length === 0 ? args.path : nodePath.join(nodePath.dirname(args.importer), args.path),
 				namespace: "artifact"
 			};
 		});
-		const bundleArtifacts = /* @__PURE__ */ new Set();
+		const tempArtifacts = /* @__PURE__ */ new Set();
 		build.onLoad({
 			filter: /.*/,
 			namespace: "artifact"
 		}, async (args) => {
-			let contents;
-			if (args.path === SENTINEL_PATH) contents = "export default null;";
-			else {
-				const artifact = new Artifact(args.path.startsWith("./") ? args.path.slice(2) : args.path);
-				bundleArtifacts.add(artifact);
-				if (!KNOWN_EXTS.has(artifact.ext) && isLocalPath(args.path) && args.path.startsWith(source_path)) {
-					await applyPlugins([artifact]);
-					if (!KNOWN_EXTS.has(artifact.ext)) {
-						console.error(`No plugins given for compiling ".${artifact.ext}" files to bundle JavaScript/TypeScript (found "${args.path}").`);
-						process.exit(1);
-					}
-				}
-				contents = await artifact.text();
-				if (JS_EXTS.has(artifact.ext)) artifact.updateExt("js");
+			if (!args.path.startsWith(source_path)) return;
+			const resolveDir = nodePath.dirname(args.path);
+			if (args.path.includes(SENTINEL_PATH)) return {
+				contents: "export default null;",
+				loader: "js",
+				resolveDir
+			};
+			const artifact = new Artifact(args.path.replace(source_path, "").slice(1));
+			tempArtifacts.add(artifact);
+			await applyPlugins([artifact]);
+			const loader = getLoaderByOnLoadArgs(args) ?? getLoaderByFilePath(artifact.project_path);
+			if (loader === void 0) {
+				console.error(`No plugins given for compiling ".${artifact.ext}" files to bundle with esbuild (found "${args.path}").`);
+				process.exit(1);
 			}
 			return {
-				contents,
-				loader: "ts"
+				contents: await artifact.text(),
+				loader,
+				resolveDir
 			};
 		});
 		build.onEnd(() => {
-			for (const artifact of bundleArtifacts) if (!collections.js.has(artifact)) artifact.delete();
+			for (const artifact of tempArtifacts) if (!collections.bundle.has(artifact)) artifact.delete();
 		});
 	}
 };
 /** Runs JS/TS bundling */
 async function bundle() {
 	const paths = [];
-	for (const artifact of collections.js) paths.push(artifact.project_path);
-	const result = await esbuild.build({
+	for (const artifact of collections.bundle) paths.push(artifact.absolute_path);
+	const esbuild_options = {
 		absWorkingDir: source_path,
 		plugins: [esbuildPlugin],
-		entryPoints: [SENTINEL_PATH, ...paths],
+		entryPoints: [nodePath.join(source_path, SENTINEL_PATH), ...paths],
 		outdir: "/",
 		bundle: true,
 		chunkNames: "js/chunks/[hash]",
 		format: "esm",
+		metafile: true,
 		minify: is_prod,
 		splitting: true,
 		write: false
-	});
+	};
+	const result = await esbuild.build(esbuild_options);
 	if (result.errors.length > 0) {
 		console.error("esbuild errors:");
 		for (const error of result.errors) console.error(error.text);
 		process.exit(1);
 	}
+	const metafile = processMetafile(esbuild_options, result.metafile);
 	for (const output of result.outputFiles) {
-		const static_path = output.path.slice(1);
-		if (static_path !== SENTINEL_PATH) {
-			const artifact = new Artifact(static_path);
-			artifact.update(output.contents);
-			collections.js.add(artifact);
+		if (output.path.includes(SENTINEL_PATH)) continue;
+		const output_project_path = output.path.slice(1);
+		const meta = metafile.get(output_project_path);
+		if (meta === void 0) throw new Error(`No metafile entry found for ${output_project_path}.`);
+		const artifact = new Artifact(meta.project_path ?? output_project_path);
+		if (artifact.project_path !== output_project_path) artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1));
+		artifact.update(output.contents);
+		collections.bundle.add(artifact);
+	}
+	for (const [project_path, { imports }] of metafile) {
+		const artifact = new Artifact(project_path);
+		for (const imported_project_path of imports) {
+			const importedArtifact = new Artifact(imported_project_path);
+			artifact.link(importedArtifact);
 		}
 	}
+}
+/** Processes the esbuild metafile. */
+function processMetafile(esbuild_options, metafile) {
+	const result = /* @__PURE__ */ new Map();
+	const output_prefix = nodePath.relative(esbuild_options.absWorkingDir, esbuild_options.outdir) + "/";
+	const output_entrypoint_prefix = `artifact:${esbuild_options.absWorkingDir}/`;
+	for (const [output_path, output] of Object.entries(metafile.outputs)) {
+		if (output_path.includes(SENTINEL_PATH)) continue;
+		if (!output_path.startsWith(output_prefix)) throw new Error(`Esbuild output "${output_path}" does not start with "${output_prefix}".`);
+		const output_project_path = output_path.slice(output_prefix.length);
+		let project_path;
+		if (output.entryPoint !== void 0) {
+			if (output.entryPoint.startsWith(output_entrypoint_prefix) !== true) throw new Error(`Esbuild entrypoint "${output.entryPoint}" does not start with "${output_entrypoint_prefix}": ${output.entryPoint}`);
+			project_path = output.entryPoint.slice(output_entrypoint_prefix.length);
+			if (nodePath.dirname(output_project_path) !== nodePath.dirname(project_path)) throw new Error(`Esbuild moved "${project_path}" to "${output_project_path}", which is in another directory. This should not happen.`);
+		}
+		result.set(output_project_path, {
+			project_path,
+			imports: output.imports.map((import_) => {
+				if (!import_.path.startsWith(output_prefix)) throw new Error(`Esbuild output import "${import_.path}" does not start with "${output_prefix}".`);
+				return import_.path.slice(output_prefix.length);
+			})
+		});
+	}
+	return result;
 }
 //#endregion
 //#region src/build/formatter.ts
@@ -372,40 +465,50 @@ async function parseHtml(artifact) {
 	let unitedScriptArtifact;
 	rewriter.on("script", { element(element) {
 		const attr_src = element.getAttribute("src");
-		if (attr_src !== null && !isLocalPath(attr_src)) return;
+		if (attr_src !== null && !isFileImportSpecifier(attr_src)) return;
 		const attributes = new Map(element.attributes);
 		attributes.delete("kit10:inline");
 		attributes.delete("src");
-		const project_path = attr_src === null ? null : getRelativeProjectPath(artifact.project_path, attr_src);
 		if (attr_src === null || element.getAttribute("kit10:inline") !== null) {
 			let scriptArtifact;
 			if (attr_src === null) {
-				scriptArtifact = artifact.create();
-				scriptArtifact.updateExt("js");
+				scriptArtifact = artifact.create({ ext: "js" });
 				element.onEndTag(() => {
 					scriptArtifact.update(tag_content);
 				});
-			} else scriptArtifact = artifact.create(project_path);
+			} else scriptArtifact = artifact.create(getRelativeProjectPath(artifact.project_path, attr_src));
 			element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 			scriptArtifact.meta.script = {
 				inline: true,
 				attributes
 			};
-			collections.js.add(scriptArtifact);
+			collections.bundle.add(scriptArtifact);
 		} else {
 			if (unitedScriptArtifact) element.remove();
 			else {
-				unitedScriptArtifact = artifact.create();
-				unitedScriptArtifact.updateExt("js");
+				unitedScriptArtifact = artifact.create({ ext: "united.js" });
 				unitedScriptArtifact.meta.script = {
 					inline: false,
 					attributes: new Map([["type", "module"]])
 				};
 				element.replace(`<!--${unitedScriptArtifact.id}-->`, { html: true });
-				collections.js.add(unitedScriptArtifact);
+				collections.bundle.add(unitedScriptArtifact);
 			}
-			unitedScriptArtifact.append(`import "${project_path}";\n`);
+			unitedScriptArtifact.append(`import "${attr_src}";\n`);
 		}
+	} });
+	rewriter.on("style", { element(element) {
+		const attributes = new Map(element.attributes);
+		const styleArtifact = artifact.create({ ext: "css" });
+		styleArtifact.meta.style = {
+			inline: true,
+			attributes
+		};
+		element.replace(`<!--${styleArtifact.id}-->`, { html: true });
+		element.onEndTag(() => {
+			styleArtifact.update(tag_content);
+		});
+		collections.bundle.add(styleArtifact);
 	} });
 	rewriter.on("head", { element(element) {
 		element.append(HEAD_PLACEHOLDER, { html: true });
@@ -491,11 +594,26 @@ async function finalizeHtmlOne(artifact) {
 			if (script_contents !== void 0) tag += script_contents;
 			tag += "<\/script>";
 			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
+			continue;
+		}
+		const style_metadata = dependencyArtifact.meta.style;
+		if (style_metadata) {
+			let script_contents;
+			if (style_metadata.inline || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD) {
+				script_contents = await dependencyArtifact.text();
+				artifact.unlink(dependencyArtifact);
+			}
+			let tag;
+			if (script_contents === void 0) {
+				tag = `<link href="/${dependencyArtifact.project_path}"`;
+				for (const [key, value] of new Map([["rel", "stylesheet"], ...style_metadata.attributes ?? []])) tag += ` ${key}="${escapeAttributeValue(value)}"`;
+				tag += ">";
+			} else tag = `<style>${script_contents}</style>`;
+			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
+			continue;
 		}
 	}
 	artifact.update(contents);
-	console.log("----------", "[", artifact.project_path, "]", "----------");
-	console.log(contents);
 }
 /** Puts back resources into the HTML pages. */
 async function finalizeHtml() {
@@ -705,12 +823,6 @@ const start = process.hrtime.bigint();
 processEntrypoints();
 await compileToHtml();
 await processHtml();
-console.log("script artifacts:");
-for (const artifact of collections.js) {
-	console.log("----------", "[", artifact.project_path, "]", "----------");
-	console.log(await artifact.text());
-}
-console.log("----------");
 await bundle();
 await finalizeHtml();
 artifact.delete();

@@ -1,5 +1,6 @@
 import type { Artifact } from './artifact.js';
 import * as buildOptions from './options.js';
+import { cssPlugin } from './plugins/css.js';
 
 type Promisable<T> = T | Promise<T>;
 export type Plugin = {
@@ -11,21 +12,24 @@ export type Plugin = {
 	end?: () => Promisable<void>;
 };
 
+const plugins = buildOptions.config.plugins ?? [];
+plugins.push(cssPlugin);
+
 /** Applies the plugins from the config. */
 export async function applyPlugins(
 	artifacts: Artifact[] | Set<Artifact> | IterableIterator<Artifact>,
 ): Promise<void> {
-	if (!buildOptions.config.plugins) {
-		return;
-	}
-
 	const artifacts_set =
 		artifacts instanceof Set ? artifacts : new Set(artifacts);
 
-	for (const plugin of buildOptions.config.plugins) {
+	for (const plugin of plugins) {
 		const promises = [];
 		for (const artifact of artifacts_set) {
-			if (plugin.filter === '*' || plugin.filter.test(artifact.project_path)) {
+			if (
+				plugin.filter === '*'
+				|| ((plugin.filter.lastIndex = 0),
+				plugin.filter.test(artifact.project_path))
+			) {
 				const result = plugin.transform(artifact, {
 					source_path: buildOptions.source_path,
 					is_prod: buildOptions.is_prod,

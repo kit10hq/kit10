@@ -7,14 +7,19 @@ declare class Artifact {
   readonly id: string;
   meta: Record<string, unknown>;
   constructor(project_path: string, content?: ArtifactContent | ArtifactContent[]);
-  create(content?: ArtifactContent | ArtifactContent[]): Artifact;
-  create(relative_path: string, content?: ArtifactContent | ArtifactContent[]): Artifact;
+  create(project_path: string): Artifact;
+  create(options: {
+    ext: string;
+    content?: ArtifactContent | ArtifactContent[];
+  }): Artifact;
   /** Adds artifact as a dependency of this artifact. */
   link(artifact: Artifact): void;
   /** Removes artifact as a dependency of this artifact. */
   unlink(artifact: Artifact): void;
   get project_path(): string;
   get absolute_path(): string;
+  get filename(): string;
+  updateFilename(filename: string): void;
   get is_page(): boolean;
   get ext(): string;
   /** Updates the file extension. */
@@ -35,10 +40,10 @@ declare class Artifact {
   update(data: ArtifactContent | ArtifactContent[]): void;
   /** Appends to the artifact contents. */
   append(data: ArtifactContent): void;
-  /** Processes the artifact with user defined plugins. */
-  process(): Promise<void>;
   /** Deletes the artifact from build context. */
   delete(): void;
+  /** Writes the artifact to disk. */
+  flush(): Promise<void>;
   toString(): string;
   [inspect.custom](): string;
 }
@@ -65,4 +70,4 @@ type Config = {
   };
 };
 //#endregion
-export type { Config, Plugin };
+export type { Artifact, Config, Plugin };

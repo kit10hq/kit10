@@ -3,7 +3,7 @@
 import { escapeAttributeValue } from '../utils.js';
 import type { Artifact } from './artifact.js';
 import * as artifacts from './artifact.js';
-import { parseHtml, type ScriptMetadata } from './html/parse.js';
+import { type ElementMetadata, parseHtml } from './html/parse.js';
 import { templateArtifact, wrapInTemplate } from './html/template.js';
 import * as buildOptions from './options.js';
 import { applyPlugins } from './plugins.js';
@@ -52,12 +52,13 @@ export async function processHtml() {
 const INLINE_TRESHOLD = buildOptions.config.build?.inlineTreshold ?? 2000;
 
 /** Puts back resources into the HTML page. */
+// oxlint-disable-next-line max-statements
 async function finalizeHtmlOne(artifact: Artifact) {
 	let contents = await artifact.text();
 
 	for (const dependencyArtifact of artifact.dependencies) {
 		const script_metadata = dependencyArtifact.meta.script as
-			| ScriptMetadata
+			| ElementMetadata
 			| undefined;
 		if (script_metadata) {
 			let script_contents: string | undefined;
@@ -90,13 +91,50 @@ async function finalizeHtmlOne(artifact: Artifact) {
 			tag += '</script>';
 
 			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
+
+			continue;
+		}
+
+		const style_metadata = dependencyArtifact.meta.style as
+			| ElementMetadata
+			| undefined;
+		if (style_metadata) {
+			let script_contents: string | undefined;
+			if (
+				style_metadata.inline
+				|| dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+			) {
+				// oxlint-disable-next-line no-await-in-loop
+				script_contents = await dependencyArtifact.text();
+				artifact.unlink(dependencyArtifact);
+			}
+
+			let tag: string;
+			if (script_contents === undefined) {
+				tag = `<link href="/${dependencyArtifact.project_path}"`;
+
+				for (const [key, value] of new Map([
+					['rel', 'stylesheet'],
+					...(style_metadata.attributes ?? []),
+				])) {
+					tag += ` ${key}="${escapeAttributeValue(value)}"`;
+				}
+
+				tag += '>';
+			} else {
+				tag = `<style>${script_contents}</style>`;
+			}
+
+			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
+
+			continue;
 		}
 	}
 
 	artifact.update(contents);
 
-	console.log('----------', '[', artifact.project_path, ']', '----------');
-	console.log(contents);
+	// console.log('----------', '[', artifact.project_path, ']', '----------');
+	// console.log(contents);
 }
 
 /** Puts back resources into the HTML pages. */

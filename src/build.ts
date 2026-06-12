@@ -27,14 +27,14 @@ await compileToHtml();
 // find dependencies, wrap pages into +template.html, ...
 await processHtml();
 
-console.log('script artifacts:');
-for (const artifact of artifacts.collections.js) {
-	console.log('----------', '[', artifact.project_path, ']', '----------');
-	// oxlint-disable-next-line no-await-in-loop
-	console.log(await artifact.text());
-}
+// console.log('script artifacts:');
+// for (const artifact of artifacts.collections.js) {
+// 	console.log('----------', '[', artifact.project_path, ']', '----------');
+// 	// oxlint-disable-next-line no-await-in-loop
+// 	console.log(await artifact.text());
+// }
 
-console.log('----------');
+// console.log('----------');
 
 await bundle();
 

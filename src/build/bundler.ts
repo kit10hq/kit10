@@ -1,15 +1,54 @@
 // oxlint-disable unicorn/no-process-exit
 
+import nodePath from 'node:path';
+import type { BuildOptions, Loader, Metafile, OnLoadArgs } from 'esbuild';
 import * as esbuild from 'esbuild';
-import { createId, isLocalPath } from '../utils.js';
+import { createId } from '../utils.js';
 import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
-import * as options from './options.js';
+import * as buildOptions from './options.js';
 import { applyPlugins } from './plugins.js';
+import { isFileImportSpecifier } from './utils.js';
+
+// make type from BuildOptions that requires properties absWorkingDir and outdir
+type Kit10EsbuildOpions = BuildOptions &
+	Required<Pick<BuildOptions, 'absWorkingDir' | 'outdir'>> & { metafile: true };
 
 const SENTINEL_PATH = `${createId()}.js`;
-const JS_EXTS = new Set(['mjs', 'cjs', 'ts', 'mts', 'cts']);
-const KNOWN_EXTS = new Set(['js', ...JS_EXTS, 'json']);
+
+/** Returns esbuild loader by onLoad args. */
+function getLoaderByOnLoadArgs(args: OnLoadArgs): Loader | undefined {
+	switch (args.with.type) {
+		case 'json':
+			return 'json';
+		case 'text':
+			return 'text';
+		case 'bytes':
+			return 'binary';
+		// no default
+	}
+}
+
+/** Returns esbuild loader for the given path. */
+function getLoaderByFilePath(path: string): Loader | undefined {
+	switch (path.split('.').at(-1)) {
+		case 'js':
+		case 'mjs':
+		case 'cjs':
+			return 'js';
+		case 'ts':
+		case 'mts':
+		case 'cts':
+			return 'ts';
+		case 'json':
+			return 'json';
+		case 'css':
+			return 'css';
+		case 'txt':
+			return 'text';
+		// no default
+	}
+}
 
 const esbuildPlugin: esbuild.Plugin = {
 	name: 'kit10',
@@ -17,60 +56,66 @@ const esbuildPlugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (isLocalPath(args.path)) {
+			if (isFileImportSpecifier(args.path)) {
+				const path =
+					args.importer.length === 0
+						? args.path
+						: nodePath.join(nodePath.dirname(args.importer), args.path);
 				return {
-					path: args.path,
+					path,
 					namespace: 'artifact',
 				};
 			}
 		});
 
-		const bundleArtifacts = new Set<Artifact>();
+		const tempArtifacts = new Set<Artifact>();
 
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onLoad({ filter: /.*/, namespace: 'artifact' }, async (args) => {
-			let contents: string;
-			if (args.path === SENTINEL_PATH) {
-				contents = 'export default null;';
-			} else {
-				const artifact = new Artifact(
-					args.path.startsWith('./') ? args.path.slice(2) : args.path,
+			// if (!isFileImportSpecifier(args.path)) {
+			if (!args.path.startsWith(buildOptions.source_path)) {
+				return;
+			}
+
+			const resolveDir = nodePath.dirname(args.path);
+
+			if (args.path.includes(SENTINEL_PATH)) {
+				return {
+					contents: 'export default null;',
+					loader: 'js',
+					resolveDir,
+				};
+			}
+
+			const artifact = new Artifact(
+				args.path.replace(buildOptions.source_path, '').slice(1),
+			);
+			tempArtifacts.add(artifact);
+
+			await applyPlugins([artifact]);
+
+			const loader =
+				getLoaderByOnLoadArgs(args)
+				?? getLoaderByFilePath(artifact.project_path);
+			if (loader === undefined) {
+				// oxlint-disable-next-line no-console
+				console.error(
+					`No plugins given for compiling ".${artifact.ext}" files to bundle with esbuild (found "${args.path}").`,
 				);
-				bundleArtifacts.add(artifact);
-
-				if (
-					!KNOWN_EXTS.has(artifact.ext)
-					&& isLocalPath(args.path)
-					&& args.path.startsWith(options.source_path)
-				) {
-					await applyPlugins([artifact]);
-
-					if (!KNOWN_EXTS.has(artifact.ext)) {
-						// oxlint-disable-next-line no-console
-						console.error(
-							`No plugins given for compiling ".${artifact.ext}" files to bundle JavaScript/TypeScript (found "${args.path}").`,
-						);
-						process.exit(1);
-					}
-				}
-
-				contents = await artifact.text();
-
-				if (JS_EXTS.has(artifact.ext)) {
-					artifact.updateExt('js');
-				}
+				process.exit(1);
 			}
 
 			return {
-				contents,
-				loader: 'ts',
+				contents: await artifact.text(),
+				loader,
+				resolveDir,
 			};
 		});
 
 		build.onEnd(() => {
-			for (const artifact of bundleArtifacts) {
-				if (!artifacts.collections.js.has(artifact)) {
+			for (const artifact of tempArtifacts) {
+				if (!artifacts.collections.bundle.has(artifact)) {
 					artifact.delete();
 				}
 			}
@@ -81,23 +126,29 @@ const esbuildPlugin: esbuild.Plugin = {
 /** Runs JS/TS bundling */
 export async function bundle(): Promise<void> {
 	const paths = [];
-	for (const artifact of artifacts.collections.js) {
-		paths.push(artifact.project_path);
+	for (const artifact of artifacts.collections.bundle) {
+		paths.push(artifact.absolute_path);
 	}
 
-	const result = await esbuild.build({
-		absWorkingDir: options.source_path,
+	const esbuild_options = {
+		absWorkingDir: buildOptions.source_path,
 		plugins: [esbuildPlugin],
-		entryPoints: [SENTINEL_PATH, ...paths],
+		entryPoints: [
+			nodePath.join(buildOptions.source_path, SENTINEL_PATH),
+			...paths,
+		],
 		outdir: '/',
 		//
 		bundle: true,
 		chunkNames: 'js/chunks/[hash]',
 		format: 'esm',
-		minify: options.is_prod,
+		metafile: true,
+		minify: buildOptions.is_prod,
 		splitting: true,
 		write: false,
-	});
+	} satisfies Kit10EsbuildOpions;
+
+	const result = await esbuild.build(esbuild_options);
 	if (result.errors.length > 0) {
 		// oxlint-disable-next-line no-console
 		console.error('esbuild errors:');
@@ -109,17 +160,105 @@ export async function bundle(): Promise<void> {
 		process.exit(1);
 	}
 
-	// console.log('esbuild', result);
+	const metafile = processMetafile(esbuild_options, result.metafile);
 
 	for (const output of result.outputFiles) {
-		const static_path = output.path.slice(1);
-		if (static_path !== SENTINEL_PATH) {
-			const artifact = new Artifact(static_path);
-			artifact.update(output.contents);
-
-			artifacts.collections.js.add(artifact);
+		// console.log('esbuild result', output.path);
+		if (output.path.includes(SENTINEL_PATH)) {
+			continue;
 		}
+
+		const output_project_path = output.path.slice(1);
+		// console.log('output path', output.path);
+		const meta = metafile.get(output_project_path);
+		if (meta === undefined) {
+			throw new Error(`No metafile entry found for ${output_project_path}.`);
+		}
+
+		// const artifact_path = meta.project_path ?? output_project_path;
+		const artifact = new Artifact(meta.project_path ?? output_project_path);
+		if (artifact.project_path !== output_project_path) {
+			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1)!);
+		}
+
+		artifact.update(output.contents);
+
+		artifacts.collections.bundle.add(artifact);
 	}
 
 	// FIXME: add artifacts as dependencies to each other
+	for (const [project_path, { imports }] of metafile) {
+		const artifact = new Artifact(project_path);
+
+		for (const imported_project_path of imports) {
+			const importedArtifact = new Artifact(imported_project_path);
+			artifact.link(importedArtifact);
+		}
+	}
+}
+
+type BundleOutputMetadata = {
+	project_path?: string;
+	imports: string[];
+};
+
+/** Processes the esbuild metafile. */
+function processMetafile(
+	esbuild_options: Kit10EsbuildOpions,
+	metafile: Metafile,
+): Map<string, BundleOutputMetadata> {
+	const result = new Map<string, BundleOutputMetadata>();
+	const output_prefix =
+		nodePath.relative(esbuild_options.absWorkingDir, esbuild_options.outdir)
+		+ '/';
+	const output_entrypoint_prefix = `artifact:${esbuild_options.absWorkingDir}/`;
+
+	for (const [output_path, output] of Object.entries(metafile.outputs)) {
+		if (output_path.includes(SENTINEL_PATH)) {
+			continue;
+		}
+
+		if (!output_path.startsWith(output_prefix)) {
+			throw new Error(
+				`Esbuild output "${output_path}" does not start with "${output_prefix}".`,
+			);
+		}
+
+		const output_project_path = output_path.slice(output_prefix.length);
+
+		// oxlint-disable-next-line no-unassigned-vars
+		let project_path: string | undefined;
+		if (output.entryPoint !== undefined) {
+			if (output.entryPoint.startsWith(output_entrypoint_prefix) !== true) {
+				throw new Error(
+					`Esbuild entrypoint "${output.entryPoint}" does not start with "${output_entrypoint_prefix}": ${output.entryPoint}`,
+				);
+			}
+
+			project_path = output.entryPoint.slice(output_entrypoint_prefix.length);
+
+			if (
+				nodePath.dirname(output_project_path) !== nodePath.dirname(project_path)
+			) {
+				throw new Error(
+					`Esbuild moved "${project_path}" to "${output_project_path}", which is in another directory. This should not happen.`,
+				);
+			}
+		}
+
+		result.set(output_project_path, {
+			project_path,
+			imports: output.imports.map((import_) => {
+				if (!import_.path.startsWith(output_prefix)) {
+					throw new Error(
+						`Esbuild output import "${import_.path}" does not start with "${output_prefix}".`,
+					);
+				}
+
+				return import_.path.slice(output_prefix.length);
+			}),
+		});
+	}
+
+	return result;
 }

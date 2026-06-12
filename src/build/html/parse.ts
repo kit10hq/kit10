@@ -1,7 +1,7 @@
 import { HTMLRewriter } from 'html-rewriter-wasm';
-import { getRelativeProjectPath, isLocalPath } from '../../utils.js';
 import type { Artifact, ArtifactContent } from '../artifact.js';
 import * as artifacts from '../artifact.js';
+import { getRelativeProjectPath, isFileImportSpecifier } from '../utils.js';
 import { HEAD_PLACEHOLDER, PAGE_PLACEHOLDER } from './template.js';
 
 export type HtmlParsed = {
@@ -9,7 +9,7 @@ export type HtmlParsed = {
 	kit10_head: ArtifactContent[];
 	html: ArtifactContent[];
 };
-export type ScriptMetadata = {
+export type ElementMetadata = {
 	inline: boolean;
 	attributes?: Map<string, string>;
 };
@@ -66,7 +66,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 		element(element) {
 			const attr_src = element.getAttribute('src');
 			// ignore https://
-			if (attr_src !== null && !isLocalPath(attr_src)) {
+			if (attr_src !== null && !isFileImportSpecifier(attr_src)) {
 				return;
 			}
 
@@ -74,10 +74,6 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 			attributes.delete('kit10:inline');
 			attributes.delete('src');
 
-			const project_path =
-				attr_src === null
-					? null
-					: getRelativeProjectPath(artifact.project_path, attr_src);
 			const inline =
 				attr_src === null || element.getAttribute('kit10:inline') !== null;
 
@@ -85,57 +81,63 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 				let scriptArtifact: Artifact;
 				// inlined scripts
 				if (attr_src === null) {
-					scriptArtifact = artifact.create();
-					scriptArtifact.updateExt('js');
+					scriptArtifact = artifact.create({ ext: 'js' });
 					element.onEndTag(() => {
 						scriptArtifact.update(tag_content);
 					});
 				} else {
-					scriptArtifact = artifact.create(project_path!);
+					scriptArtifact = artifact.create(
+						getRelativeProjectPath(artifact.project_path, attr_src),
+					);
 				}
 
 				element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 				scriptArtifact.meta.script = {
 					inline: true,
 					attributes,
-				} satisfies ScriptMetadata;
+				} satisfies ElementMetadata;
 
-				artifacts.collections.js.add(scriptArtifact);
+				artifacts.collections.bundle.add(scriptArtifact);
 			} else {
 				if (unitedScriptArtifact) {
 					element.remove();
 				} else {
-					unitedScriptArtifact = artifact.create();
-					unitedScriptArtifact.updateExt('js');
+					unitedScriptArtifact = artifact.create({
+						ext: 'united.js',
+					});
 					unitedScriptArtifact.meta.script = {
 						inline: false,
 						attributes: new Map([['type', 'module']]),
-					} satisfies ScriptMetadata;
+					} satisfies ElementMetadata;
 
 					element.replace(`<!--${unitedScriptArtifact.id}-->`, { html: true });
 
-					artifacts.collections.js.add(unitedScriptArtifact);
+					artifacts.collections.bundle.add(unitedScriptArtifact);
 				}
 
-				unitedScriptArtifact.append(`import "${project_path}";\n`);
+				unitedScriptArtifact.append(`import "${attr_src}";\n`);
 			}
 		},
 	});
 
-	// rewriter.on('style', {
-	// 	// oxlint-disable-next-line require-await
-	// 	element(element) {
-	// 		const styleArtifact = artifact.create('', { ext: 'css' });
-	// 		styleArtifact.meta.html_type = 'style';
+	rewriter.on('style', {
+		element(element) {
+			const attributes = new Map(element.attributes);
 
-	// 		element.setInnerContent(`/* ${styleArtifact.id} */`);
+			const styleArtifact = artifact.create({ ext: 'css' });
+			styleArtifact.meta.style = {
+				inline: true,
+				attributes,
+			} satisfies ElementMetadata;
 
-	// 		element.onEndTag(() => {
-	// 			styleArtifact.update(tag_content);
-	// 			promises.push(styleArtifact.process());
-	// 		});
-	// 	},
-	// });
+			element.replace(`<!--${styleArtifact.id}-->`, { html: true });
+			element.onEndTag(() => {
+				styleArtifact.update(tag_content);
+			});
+
+			artifacts.collections.bundle.add(styleArtifact);
+		},
+	});
 
 	// rewriter.on('link', {
 	// 	element(element) {

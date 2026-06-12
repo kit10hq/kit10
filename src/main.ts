@@ -17,6 +17,6 @@ if (command === 'dev' || command === 'build') {
 	process.exit(1);
 }
 
+export type { Artifact } from './build/artifact.js';
 export type { Config } from './build/options.js';
-// export type { Artifact } from './build/artifact.js';
 export type { Plugin } from './build/plugins.js';
