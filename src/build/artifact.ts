@@ -303,6 +303,11 @@ export class Artifact {
 	}
 }
 
+/** Returns whether an artifact exists for the given project path. */
+export function exists(project_path: string): boolean {
+	return all.has(project_path);
+}
+
 /** Writes a single artifact to disk. */
 async function flushOne(artifact: Artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));

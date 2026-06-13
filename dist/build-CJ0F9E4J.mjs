@@ -350,8 +350,11 @@ const esbuildKit10Plugin = {
 	name: "kit10",
 	setup(build) {
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (describeImportSpecifier(args.path).local) return {
-				path: args.importer.length === 0 ? args.path : nodePath.join(nodePath.dirname(args.importer), args.path),
+			if (!describeImportSpecifier(args.path).local) return;
+			const absolute_path = args.importer.length === 0 ? args.path : nodePath.join(nodePath.dirname(args.importer), args.path);
+			if (!absolute_path.startsWith(source_path)) return;
+			return {
+				path: absolute_path,
 				namespace: "artifact"
 			};
 		});
@@ -360,7 +363,6 @@ const esbuildKit10Plugin = {
 			filter: /.*/,
 			namespace: "artifact"
 		}, async (args) => {
-			if (!args.path.startsWith(source_path)) return;
 			const resolveDir = nodePath.dirname(args.path);
 			if (args.path.includes(SENTINEL_PATH)) return {
 				contents: "export default null;",
@@ -630,50 +632,74 @@ async function processHtml() {
 	await Promise.all(promises);
 }
 const INLINE_TRESHOLD = config.build?.inlineTreshold ?? 2e3;
-/** Puts back resources into the HTML page. */
-async function finalizeHtmlOne(artifact) {
-	let contents = await artifact.text();
-	for (const dependencyArtifact of artifact.dependencies) {
-		const script_metadata = dependencyArtifact.meta.script;
-		if (script_metadata) {
-			let script_contents;
-			if (script_metadata.inline || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD) {
-				script_contents = await dependencyArtifact.text();
-				artifact.unlink(dependencyArtifact);
-			}
-			let tag = "<script";
-			if (script_contents === void 0) tag += ` src="/${dependencyArtifact.project_path}"`;
-			if (script_metadata.attributes) for (const [key, value] of script_metadata.attributes) tag += ` ${key}="${escapeAttributeValue(value)}"`;
-			tag += ">";
-			if (script_contents !== void 0) tag += script_contents;
-			tag += "<\/script>";
-			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
-			continue;
-		}
-		const style_metadata = dependencyArtifact.meta.style;
-		if (style_metadata) {
-			let script_contents;
-			if (style_metadata.inline) {
-				script_contents = await dependencyArtifact.text();
-				artifact.unlink(dependencyArtifact);
-			}
-			let tag;
-			if (script_contents === void 0) {
-				tag = `<link href="/${dependencyArtifact.project_path}"`;
-				for (const [key, value] of new Map([["rel", "stylesheet"], ...style_metadata.attributes ?? []])) tag += ` ${key}="${escapeAttributeValue(value)}"`;
-				tag += ">";
-			} else tag = `<style>${script_contents}</style>`;
-			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
-			continue;
-		}
-	}
-	artifact.update(contents);
-}
 /** Puts back resources into the HTML pages. */
 async function finalizeHtml() {
 	const promises = [];
 	for (const artifact of collections.html) promises.push(finalizeHtmlOne(artifact));
 	await Promise.all(promises);
+}
+/** Puts back resources into the HTML page. */
+async function finalizeHtmlOne(artifact) {
+	let contents = await artifact.text();
+	const promises = [];
+	for (const dependencyArtifact of artifact.dependencies) {
+		if (dependencyArtifact.meta.script) {
+			promises.push(computeReplacementScript(artifact, dependencyArtifact));
+			continue;
+		}
+		if (dependencyArtifact.meta.style) {
+			promises.push(computeReplacementStyle(artifact, dependencyArtifact));
+			continue;
+		}
+	}
+	const replacements = await Promise.all(promises);
+	for (const [search, replace] of replacements) contents = contents.replaceAll(search, replace);
+	artifact.update(contents);
+}
+/** Returns the replacement script tag for the given dependency artifact. */
+async function computeReplacementScript(artifact, dependencyArtifact) {
+	const script_metadata = dependencyArtifact.meta.script;
+	let script_contents;
+	if (script_metadata.inline || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD) {
+		script_contents = await dependencyArtifact.text();
+		for (const artifact_ of dependencyArtifact.dependencies) artifact.link(artifact_);
+		artifact.unlink(dependencyArtifact);
+	}
+	let tag = "<script";
+	if (script_contents === void 0) tag += ` src="/${dependencyArtifact.project_path}"`;
+	if (script_metadata.attributes) for (const [key, value] of script_metadata.attributes) tag += ` ${key}="${escapeAttributeValue(value)}"`;
+	tag += ">";
+	if (script_contents !== void 0) tag += script_contents;
+	tag += "<\/script>";
+	return [`<!--${dependencyArtifact.id}-->`, tag];
+}
+const LINK_ATTRS_REMOVE_ON_STYLE = new Set([
+	"rel",
+	"as",
+	"onload"
+]);
+/** Returns the replacement style tag for the given dependency artifact. */
+async function computeReplacementStyle(artifact, dependencyArtifact) {
+	const style_metadata = dependencyArtifact.meta.style;
+	let script_contents;
+	if (style_metadata.inline) {
+		script_contents = await dependencyArtifact.text();
+		for (const artifact_ of dependencyArtifact.dependencies) artifact.link(artifact_);
+		artifact.unlink(dependencyArtifact);
+	}
+	let tag = "";
+	if (script_contents === void 0) {
+		tag += `<link href="/${dependencyArtifact.project_path}"`;
+		for (const [key, value] of new Map([["rel", "stylesheet"], ...style_metadata.attributes ?? []])) tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		tag += ">";
+	} else {
+		tag += `<style`;
+		if (style_metadata.attributes) {
+			for (const [key, value] of style_metadata.attributes) if (!LINK_ATTRS_REMOVE_ON_STYLE.has(tag)) tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+		tag += `>${script_contents}</style>`;
+	}
+	return [`<!--${dependencyArtifact.id}-->`, tag];
 }
 //#endregion
 //#region src/build/router/filename.ts

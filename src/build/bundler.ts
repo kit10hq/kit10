@@ -78,16 +78,35 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (describeImportSpecifier(args.path).local) {
-				const path =
-					args.importer.length === 0
-						? args.path
-						: nodePath.join(nodePath.dirname(args.importer), args.path);
-				return {
-					path,
-					namespace: 'artifact',
-				};
+			// console.log(
+			// 	'[esbuild]',
+			// 	'[onResolve]',
+			// 	args,
+			// 	describeImportSpecifier(args.path),
+			// );
+
+			// ignore if imported path does not point to a local file
+			if (!describeImportSpecifier(args.path).local) {
+				return;
 			}
+
+			const absolute_path =
+				args.importer.length === 0
+					? args.path
+					: nodePath.join(nodePath.dirname(args.importer), args.path);
+			// ignore all files that are not from the source path
+			if (!absolute_path.startsWith(buildOptions.source_path)) {
+				return;
+			}
+
+			// we should not ignore anything else (for example, non-artifact files), because esbuild should support any files we import.
+			// in project source directory, any files can exist. we need to compile them with user plugins.
+			// outside, all files should be conventional, that esbuild support natively.
+
+			return {
+				path: absolute_path,
+				namespace: 'artifact',
+			};
 		});
 
 		const tempArtifacts = new Set<Artifact>();
@@ -95,10 +114,6 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onLoad({ filter: /.*/, namespace: 'artifact' }, async (args) => {
-			if (!args.path.startsWith(buildOptions.source_path)) {
-				return;
-			}
-
 			const resolveDir = nodePath.dirname(args.path);
 
 			if (args.path.includes(SENTINEL_PATH)) {

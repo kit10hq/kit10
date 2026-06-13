@@ -51,92 +51,6 @@ export async function processHtml() {
 
 const INLINE_TRESHOLD = buildOptions.config.build?.inlineTreshold ?? 2000;
 
-/** Puts back resources into the HTML page. */
-// oxlint-disable-next-line max-statements
-async function finalizeHtmlOne(artifact: Artifact) {
-	let contents = await artifact.text();
-
-	for (const dependencyArtifact of artifact.dependencies) {
-		const script_metadata = dependencyArtifact.meta.script as
-			| ElementMetadata
-			| undefined;
-		if (script_metadata) {
-			let script_contents: string | undefined;
-			if (
-				script_metadata.inline
-				|| dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
-			) {
-				// oxlint-disable-next-line no-await-in-loop
-				script_contents = await dependencyArtifact.text();
-				artifact.unlink(dependencyArtifact);
-			}
-
-			let tag = '<script';
-			if (script_contents === undefined) {
-				tag += ` src="/${dependencyArtifact.project_path}"`;
-			}
-
-			if (script_metadata.attributes) {
-				for (const [key, value] of script_metadata.attributes) {
-					tag += ` ${key}="${escapeAttributeValue(value)}"`;
-				}
-			}
-
-			tag += '>';
-
-			if (script_contents !== undefined) {
-				tag += script_contents;
-			}
-
-			tag += '</script>';
-
-			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
-
-			continue;
-		}
-
-		const style_metadata = dependencyArtifact.meta.style as
-			| ElementMetadata
-			| undefined;
-		if (style_metadata) {
-			let script_contents: string | undefined;
-			if (
-				style_metadata.inline
-				// || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
-			) {
-				// oxlint-disable-next-line no-await-in-loop
-				script_contents = await dependencyArtifact.text();
-				artifact.unlink(dependencyArtifact);
-			}
-
-			let tag: string;
-			if (script_contents === undefined) {
-				tag = `<link href="/${dependencyArtifact.project_path}"`;
-
-				for (const [key, value] of new Map([
-					['rel', 'stylesheet'],
-					...(style_metadata.attributes ?? []),
-				])) {
-					tag += ` ${key}="${escapeAttributeValue(value)}"`;
-				}
-
-				tag += '>';
-			} else {
-				tag = `<style>${script_contents}</style>`;
-			}
-
-			contents = contents.replaceAll(`<!--${dependencyArtifact.id}-->`, tag);
-
-			continue;
-		}
-	}
-
-	artifact.update(contents);
-
-	// console.log('----------', '[', artifact.project_path, ']', '----------');
-	// console.log(contents);
-}
-
 /** Puts back resources into the HTML pages. */
 export async function finalizeHtml() {
 	const promises = [];
@@ -145,4 +59,134 @@ export async function finalizeHtml() {
 	}
 
 	await Promise.all(promises);
+}
+
+type Replacement = [string, string];
+
+/** Puts back resources into the HTML page. */
+async function finalizeHtmlOne(artifact: Artifact) {
+	let contents = await artifact.text();
+
+	const promises: Promise<Replacement>[] = [];
+	for (const dependencyArtifact of artifact.dependencies) {
+		const script_metadata = dependencyArtifact.meta.script as
+			| ElementMetadata
+			| undefined;
+		if (script_metadata) {
+			promises.push(computeReplacementScript(artifact, dependencyArtifact));
+			continue;
+		}
+
+		const style_metadata = dependencyArtifact.meta.style as
+			| ElementMetadata
+			| undefined;
+		if (style_metadata) {
+			promises.push(computeReplacementStyle(artifact, dependencyArtifact));
+			continue;
+		}
+	}
+
+	const replacements = await Promise.all(promises);
+	for (const [search, replace] of replacements) {
+		contents = contents.replaceAll(search, replace);
+	}
+
+	artifact.update(contents);
+}
+
+/** Returns the replacement script tag for the given dependency artifact. */
+async function computeReplacementScript(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Promise<Replacement> {
+	const script_metadata = dependencyArtifact.meta.script as ElementMetadata;
+
+	let script_contents: string | undefined;
+	if (
+		script_metadata.inline
+		|| dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+	) {
+		// oxlint-disable-next-line no-await-in-loop
+		script_contents = await dependencyArtifact.text();
+
+		for (const artifact_ of dependencyArtifact.dependencies) {
+			artifact.link(artifact_);
+		}
+
+		artifact.unlink(dependencyArtifact);
+	}
+
+	let tag = '<script';
+	if (script_contents === undefined) {
+		tag += ` src="/${dependencyArtifact.project_path}"`;
+	}
+
+	if (script_metadata.attributes) {
+		for (const [key, value] of script_metadata.attributes) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+	}
+
+	tag += '>';
+
+	if (script_contents !== undefined) {
+		tag += script_contents;
+	}
+
+	tag += '</script>';
+
+	return [`<!--${dependencyArtifact.id}-->`, tag];
+}
+
+const LINK_ATTRS_REMOVE_ON_STYLE = new Set(['rel', 'as', 'onload']);
+
+/** Returns the replacement style tag for the given dependency artifact. */
+async function computeReplacementStyle(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Promise<Replacement> {
+	const style_metadata = dependencyArtifact.meta.style as ElementMetadata;
+
+	let script_contents: string | undefined;
+	if (
+		style_metadata.inline
+		// || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+	) {
+		// oxlint-disable-next-line no-await-in-loop
+		script_contents = await dependencyArtifact.text();
+
+		for (const artifact_ of dependencyArtifact.dependencies) {
+			artifact.link(artifact_);
+		}
+
+		artifact.unlink(dependencyArtifact);
+	}
+
+	let tag = '';
+	if (script_contents === undefined) {
+		tag += `<link href="/${dependencyArtifact.project_path}"`;
+
+		for (const [key, value] of new Map([
+			['rel', 'stylesheet'],
+			...(style_metadata.attributes ?? []),
+		])) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+
+		tag += '>';
+	} else {
+		tag += `<style`;
+
+		if (style_metadata.attributes) {
+			for (const [key, value] of style_metadata.attributes) {
+				if (!LINK_ATTRS_REMOVE_ON_STYLE.has(tag)) {
+					tag += ` ${key}="${escapeAttributeValue(value)}"`;
+				}
+			}
+		}
+
+		tag += `>${script_contents}</style>`;
+	}
+
+	return [`<!--${dependencyArtifact.id}-->`, tag];
 }
