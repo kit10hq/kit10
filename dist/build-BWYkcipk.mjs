@@ -102,6 +102,7 @@ const collections = {
 };
 const dependencies = /* @__PURE__ */ new Map();
 const dependents = /* @__PURE__ */ new Map();
+const flushed_table = [];
 var Artifact = class Artifact {
 	id = createId(36);
 	#project_path;
@@ -231,11 +232,7 @@ var Artifact = class Artifact {
 	#is_flushed = false;
 	/** Writes the artifact to disk. */
 	async flush() {
-		if (this.#is_flushed) {
-			console.log("[Artifact#flush] already flushed", this.project_path);
-			return;
-		}
-		console.log("[Artifact#flush] flushing", this.project_path, "...");
+		if (this.#is_flushed) return;
 		this.#is_flushed = true;
 		const output_path = nodePath.join(output_static_path, this.#project_path);
 		if (this.#content === null) await fs.cp(this.absolute_path, output_path);
@@ -243,6 +240,10 @@ var Artifact = class Artifact {
 			const contents = await this.bytes();
 			await fs.writeFile(output_path, contents);
 		}
+		flushed_table.push({
+			filename: this.#project_path,
+			size: String(this.sizeUnsafe).padStart(6)
+		});
 	}
 	toString() {
 		return [
@@ -268,6 +269,7 @@ async function flush() {
 	const promises = [];
 	for (const artifact of collections.html.values()) promises.push(flushOne(artifact));
 	await Promise.all(promises);
+	console.table(flushed_table);
 }
 //#endregion
 //#region src/build/plugins/css.ts
@@ -515,7 +517,7 @@ async function parseHtml(artifact) {
 				element.onEndTag(() => {
 					scriptArtifact.update(tag_content);
 				});
-			} else scriptArtifact = artifact.create(resolveProjectPath(artifact.project_path, attr_src));
+			} else scriptArtifact = artifact.create(attr_src);
 			element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 			scriptArtifact.meta.script = {
 				inline: true,
@@ -557,7 +559,7 @@ async function parseHtml(artifact) {
 		attributes.delete("kit10:inline");
 		attributes.delete("href");
 		if (element.getAttribute("rel") === "stylesheet" || element.getAttribute("rel") === "preload" && element.getAttribute("as") === "style") {
-			const linkArtifact = artifact.create(resolveProjectPath(artifact.project_path, attr_href));
+			const linkArtifact = artifact.create(attr_href);
 			element.replace(`<!--${linkArtifact.id}-->`, { html: true });
 			linkArtifact.meta.style = {
 				inline: element.getAttribute("kit10:inline") !== null,

@@ -24,6 +24,8 @@ const dependents: Map<Artifact, Set<Artifact>> = new Map<
 	Set<Artifact>
 >();
 
+const flushed_table: Record<string, unknown>[] = [];
+
 // const SYMBOL: unique symbol = Symbol('Artifact');
 
 export class Artifact {
@@ -268,11 +270,11 @@ export class Artifact {
 	/** Writes the artifact to disk. */
 	async flush(): Promise<void> {
 		if (this.#is_flushed) {
-			console.log('[Artifact#flush] already flushed', this.project_path);
+			// console.log('[Artifact#flush] already flushed', this.project_path);
 			return;
 		}
 
-		console.log('[Artifact#flush] flushing', this.project_path, '...');
+		// console.log('[Artifact#flush] flushing', this.project_path, '...');
 
 		this.#is_flushed = true;
 
@@ -287,6 +289,11 @@ export class Artifact {
 			const contents = await this.bytes();
 			await fs.writeFile(output_path, contents);
 		}
+
+		flushed_table.push({
+			filename: this.#project_path,
+			size: String(this.sizeUnsafe).padStart(6),
+		});
 	}
 
 	toString(): string {
@@ -329,4 +336,7 @@ export async function flush(): Promise<void> {
 	}
 
 	await Promise.all(promises);
+
+	// oxlint-disable-next-line no-console
+	console.table(flushed_table);
 }

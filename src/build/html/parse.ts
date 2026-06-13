@@ -1,7 +1,7 @@
 import { HTMLRewriter } from 'html-rewriter-wasm';
 import type { Artifact, ArtifactContent } from '../artifact.js';
 import * as artifacts from '../artifact.js';
-import { describeImportSpecifier, resolveProjectPath } from '../utils.js';
+import { describeImportSpecifier } from '../utils.js';
 import { HEAD_PLACEHOLDER, PAGE_PLACEHOLDER } from './template.js';
 
 export type HtmlParsed = {
@@ -89,9 +89,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 						scriptArtifact.update(tag_content);
 					});
 				} else {
-					scriptArtifact = artifact.create(
-						resolveProjectPath(artifact.project_path, attr_src),
-					);
+					scriptArtifact = artifact.create(attr_src);
 				}
 
 				element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
@@ -163,9 +161,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 				|| (element.getAttribute('rel') === 'preload'
 					&& element.getAttribute('as') === 'style')
 			) {
-				const linkArtifact = artifact.create(
-					resolveProjectPath(artifact.project_path, attr_href),
-				);
+				const linkArtifact = artifact.create(attr_href);
 
 				element.replace(`<!--${linkArtifact.id}-->`, { html: true });
 				linkArtifact.meta.style = {
