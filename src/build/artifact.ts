@@ -4,7 +4,7 @@ import { inspect } from 'node:util';
 import { createId } from '../utils.js';
 import { createDirectory } from './fs/directory.js';
 import * as buildOptions from './options.js';
-import { getRelativeProjectPath } from './utils.js';
+import { resolveProjectPath } from './utils.js';
 
 export type ArtifactContent = ConstructorParameters<typeof Blob>[0][number];
 
@@ -84,7 +84,7 @@ export class Artifact {
 			content = arg0.content ?? [];
 		}
 
-		const project_path = getRelativeProjectPath(
+		const project_path = resolveProjectPath(
 			this.#project_path,
 			'./' + relative_path,
 		);

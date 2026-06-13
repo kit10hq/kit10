@@ -5,8 +5,6 @@ import * as buildOptions from '../options.js';
 const directories_created = new Set<string>();
 const directories_creating = new Map<string, Promise<unknown>>();
 
-await fs.mkdir(buildOptions.output_static_path, { recursive: true });
-
 /** Returns all directories containing given path. */
 function getDirectories(project_dir: string): Set<string> {
 	const result = new Set<string>();
@@ -28,10 +26,6 @@ function getDirectories(project_dir: string): Set<string> {
 export function createDirectory(
 	project_dir: string,
 ): unknown | Promise<unknown> {
-	if (project_dir === '.') {
-		return;
-	}
-
 	if (directories_created.has(project_dir)) {
 		// console.log(
 		// 	`[createDirectory] "${project_dir}" already exists, skipping...`,
@@ -47,14 +41,13 @@ export function createDirectory(
 	}
 
 	const project_dir_list = getDirectories(project_dir);
+	const output_dir =
+		project_dir === '.'
+			? buildOptions.output_static_path
+			: nodePath.join(buildOptions.output_static_path, project_dir);
 
 	// console.log(`[createDirectory] creating "${project_dir}"...`);
-	const promise = fs.mkdir(
-		nodePath.join(buildOptions.output_static_path, project_dir),
-		{
-			recursive: true,
-		},
-	);
+	const promise = fs.mkdir(output_dir, { recursive: true });
 	for (const dir of project_dir_list) {
 		directories_creating.set(dir, promise);
 	}
@@ -75,6 +68,11 @@ export function createDirectory(
 
 /** Clear the dist directory. */
 export async function clearDistDirectory(): Promise<void> {
+	directories_created.clear();
+	directories_creating.clear();
+
+	await fs.mkdir(buildOptions.output_path, { recursive: true });
+
 	const entries = await fs.readdir(buildOptions.output_path, {
 		withFileTypes: true,
 	});

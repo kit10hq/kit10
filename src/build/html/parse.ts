@@ -1,7 +1,7 @@
 import { HTMLRewriter } from 'html-rewriter-wasm';
 import type { Artifact, ArtifactContent } from '../artifact.js';
 import * as artifacts from '../artifact.js';
-import { getRelativeProjectPath, isFileImportSpecifier } from '../utils.js';
+import { describeImportSpecifier, resolveProjectPath } from '../utils.js';
 import { HEAD_PLACEHOLDER, PAGE_PLACEHOLDER } from './template.js';
 
 export type HtmlParsed = {
@@ -65,8 +65,11 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 	rewriter.on('script', {
 		element(element) {
 			const attr_src = element.getAttribute('src');
-			// ignore https://
-			if (attr_src !== null && !isFileImportSpecifier(attr_src)) {
+			// ignore https:// etc.
+			if (
+				attr_src !== null
+				&& describeImportSpecifier(attr_src, 'html').local !== true
+			) {
 				return;
 			}
 
@@ -87,7 +90,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 					});
 				} else {
 					scriptArtifact = artifact.create(
-						getRelativeProjectPath(artifact.project_path, attr_src),
+						resolveProjectPath(artifact.project_path, attr_src),
 					);
 				}
 
@@ -115,7 +118,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 					artifacts.collections.bundle.add(unitedScriptArtifact);
 				}
 
-				unitedScriptArtifact.append(`import "${attr_src}";\n`);
+				unitedScriptArtifact.append(`import "./${attr_src}";\n`);
 			}
 		},
 	});
@@ -146,6 +149,11 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 				return;
 			}
 
+			// ignore https:// etc.
+			if (describeImportSpecifier(attr_href, 'html').local !== true) {
+				return;
+			}
+
 			const attributes = new Map(element.attributes);
 			attributes.delete('kit10:inline');
 			attributes.delete('href');
@@ -156,7 +164,7 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 					&& element.getAttribute('as') === 'style')
 			) {
 				const linkArtifact = artifact.create(
-					getRelativeProjectPath(artifact.project_path, attr_href),
+					resolveProjectPath(artifact.project_path, attr_href),
 				);
 
 				element.replace(`<!--${linkArtifact.id}-->`, { html: true });

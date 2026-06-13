@@ -21,7 +21,6 @@ function escapeAttributeValue(value) {
 //#region src/build/fs/directory.ts
 const directories_created = /* @__PURE__ */ new Set();
 const directories_creating = /* @__PURE__ */ new Map();
-await fs$1.mkdir(output_static_path, { recursive: true });
 /** Returns all directories containing given path. */
 function getDirectories(project_dir) {
 	const result = /* @__PURE__ */ new Set();
@@ -34,11 +33,11 @@ function getDirectories(project_dir) {
 }
 /** Creates directory and dedupes directory creation requests. */
 function createDirectory(project_dir) {
-	if (project_dir === ".") return;
 	if (directories_created.has(project_dir)) return;
 	if (directories_creating.has(project_dir)) return directories_creating.get(project_dir);
 	const project_dir_list = getDirectories(project_dir);
-	const promise = fs$1.mkdir(nodePath.join(output_static_path, project_dir), { recursive: true });
+	const output_dir = project_dir === "." ? output_static_path : nodePath.join(output_static_path, project_dir);
+	const promise = fs$1.mkdir(output_dir, { recursive: true });
 	for (const dir of project_dir_list) directories_creating.set(dir, promise);
 	promise.then(() => {
 		for (const dir of project_dir_list) {
@@ -50,6 +49,9 @@ function createDirectory(project_dir) {
 }
 /** Clear the dist directory. */
 async function clearDistDirectory() {
+	directories_created.clear();
+	directories_creating.clear();
+	await fs$1.mkdir(output_path, { recursive: true });
 	const entries = await fs$1.readdir(output_path, { withFileTypes: true });
 	const promises = [];
 	for (const entry of entries) promises.push(fs$1.rm(nodePath.join(output_path, entry.name), { recursive: true }));
@@ -60,18 +62,35 @@ async function clearDistDirectory() {
 const tsconfig = getTsconfig(project_path);
 const matchPath = tsconfig ? createPathsMatcher(tsconfig) : void 0;
 /** Checks if path points to a file in the project. */
-function isFileImportSpecifier(specifier) {
-	if (specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/") || /^[a-z]:[\\/]/iu.test(specifier)) return true;
-	if (specifier.startsWith("file:")) return true;
-	if (/^[a-z][a-z\d+.-]*:/iu.test(specifier)) return false;
-	if (specifier.startsWith("#")) return false;
-	if (matchPath?.(specifier)?.length) return true;
-	return false;
+function describeImportSpecifier(specifier, mode = "ts") {
+	if (specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/")) return {
+		local: true,
+		type: "path"
+	};
+	if (specifier.startsWith("file:")) return {
+		local: true,
+		type: "url-file"
+	};
+	if (/^[a-z][a-z\d+.-]*:/iu.test(specifier)) return {
+		local: false,
+		type: "url"
+	};
+	if (mode === "ts") {
+		if (specifier.startsWith("#")) throw new Error(`Shebang paths are not supported: "${specifier}".`);
+		if (matchPath?.(specifier)?.length) throw new Error(`Alias paths are not supported: "${specifier}".`);
+		return {
+			local: false,
+			type: "package"
+		};
+	}
+	return {
+		local: true,
+		type: "path-slashless"
+	};
 }
 /** Returns the path to a file imported from another file. */
-function getRelativeProjectPath(project_path, relative_path) {
-	if (!isFileImportSpecifier(relative_path)) throw new Error(`Can not resolve non-local path: ${relative_path}`);
-	return relative_path.startsWith("/") ? relative_path.slice(1) : nodePath.join(nodePath.dirname(project_path), relative_path);
+function resolveProjectPath(base_project_path, relative_path) {
+	return relative_path.startsWith("/") ? relative_path.slice(1) : nodePath.join(nodePath.dirname(base_project_path), relative_path);
 }
 //#endregion
 //#region src/build/artifact.ts
@@ -103,7 +122,7 @@ var Artifact = class Artifact {
 			relative_path = this.filename.replace(/\.[^.]+$/u, `-${createId()}.${arg0.ext}`);
 			content = arg0.content ?? [];
 		}
-		const newArtifact = new Artifact(getRelativeProjectPath(this.#project_path, "./" + relative_path), content);
+		const newArtifact = new Artifact(resolveProjectPath(this.#project_path, "./" + relative_path), content);
 		this.link(newArtifact);
 		return newArtifact;
 	}
@@ -313,11 +332,25 @@ function getLoaderByFilePath(path) {
 		case "txt": return "text";
 	}
 }
-const esbuildPlugin = {
+const esbuildTsJsResolverPlugin = {
+	name: "ts-js-resolver",
+	setup(build) {
+		build.onResolve({ filter: /^\..*\.js$/ }, async (args) => {
+			const tsPath = nodePath.resolve(args.resolveDir, args.path.replace(/\.js$/u, ".ts"));
+			try {
+				await fs.access(tsPath);
+				return { path: tsPath };
+			} catch {
+				return null;
+			}
+		});
+	}
+};
+const esbuildKit10Plugin = {
 	name: "kit10",
 	setup(build) {
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (isFileImportSpecifier(args.path)) return {
+			if (describeImportSpecifier(args.path).local) return {
 				path: args.importer.length === 0 ? args.path : nodePath.join(nodePath.dirname(args.importer), args.path),
 				namespace: "artifact"
 			};
@@ -359,7 +392,7 @@ async function bundle() {
 	for (const artifact of collections.bundle) paths.push(artifact.absolute_path);
 	const esbuild_options = {
 		absWorkingDir: source_path,
-		plugins: [esbuildPlugin],
+		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
 		entryPoints: [nodePath.join(source_path, SENTINEL_PATH), ...paths],
 		outdir: "/",
 		bundle: true,
@@ -469,7 +502,7 @@ async function parseHtml(artifact) {
 	let unitedScriptArtifact;
 	rewriter.on("script", { element(element) {
 		const attr_src = element.getAttribute("src");
-		if (attr_src !== null && !isFileImportSpecifier(attr_src)) return;
+		if (attr_src !== null && describeImportSpecifier(attr_src, "html").local !== true) return;
 		const attributes = new Map(element.attributes);
 		attributes.delete("kit10:inline");
 		attributes.delete("src");
@@ -480,7 +513,7 @@ async function parseHtml(artifact) {
 				element.onEndTag(() => {
 					scriptArtifact.update(tag_content);
 				});
-			} else scriptArtifact = artifact.create(getRelativeProjectPath(artifact.project_path, attr_src));
+			} else scriptArtifact = artifact.create(resolveProjectPath(artifact.project_path, attr_src));
 			element.replace(`<!--${scriptArtifact.id}-->`, { html: true });
 			scriptArtifact.meta.script = {
 				inline: true,
@@ -498,7 +531,7 @@ async function parseHtml(artifact) {
 				element.replace(`<!--${unitedScriptArtifact.id}-->`, { html: true });
 				collections.bundle.add(unitedScriptArtifact);
 			}
-			unitedScriptArtifact.append(`import "${attr_src}";\n`);
+			unitedScriptArtifact.append(`import "./${attr_src}";\n`);
 		}
 	} });
 	rewriter.on("style", { element(element) {
@@ -517,11 +550,12 @@ async function parseHtml(artifact) {
 	rewriter.on("link", { element(element) {
 		const attr_href = element.getAttribute("href");
 		if (attr_href === null) return;
+		if (describeImportSpecifier(attr_href, "html").local !== true) return;
 		const attributes = new Map(element.attributes);
 		attributes.delete("kit10:inline");
 		attributes.delete("href");
 		if (element.getAttribute("rel") === "stylesheet" || element.getAttribute("rel") === "preload" && element.getAttribute("as") === "style") {
-			const linkArtifact = artifact.create(getRelativeProjectPath(artifact.project_path, attr_href));
+			const linkArtifact = artifact.create(resolveProjectPath(artifact.project_path, attr_href));
 			element.replace(`<!--${linkArtifact.id}-->`, { html: true });
 			linkArtifact.meta.style = {
 				inline: element.getAttribute("kit10:inline") !== null,
@@ -619,7 +653,7 @@ async function finalizeHtmlOne(artifact) {
 		const style_metadata = dependencyArtifact.meta.style;
 		if (style_metadata) {
 			let script_contents;
-			if (style_metadata.inline || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD) {
+			if (style_metadata.inline) {
 				script_contents = await dependencyArtifact.text();
 				artifact.unlink(dependencyArtifact);
 			}

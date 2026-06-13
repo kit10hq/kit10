@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-process-exit
 
+import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import type { BuildOptions, Loader, Metafile, OnLoadArgs } from 'esbuild';
 import * as esbuild from 'esbuild';
@@ -8,7 +9,7 @@ import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
 import * as buildOptions from './options.js';
 import { applyPlugins } from './plugins.js';
-import { isFileImportSpecifier } from './utils.js';
+import { describeImportSpecifier } from './utils.js';
 
 // make type from BuildOptions that requires properties absWorkingDir and outdir
 type Kit10EsbuildOpions = BuildOptions &
@@ -50,13 +51,34 @@ function getLoaderByFilePath(path: string): Loader | undefined {
 	}
 }
 
-const esbuildPlugin: esbuild.Plugin = {
+const esbuildTsJsResolverPlugin: esbuild.Plugin = {
+	name: 'ts-js-resolver',
+	setup(build) {
+		// With "u" flag, we get "filter is not a valid Go regular expression" error
+		// eslint-disable-next-line require-unicode-regexp
+		build.onResolve({ filter: /^\..*\.js$/ }, async (args) => {
+			const tsPath = nodePath.resolve(
+				args.resolveDir,
+				args.path.replace(/\.js$/u, '.ts'),
+			);
+
+			try {
+				await fs.access(tsPath);
+				return { path: tsPath };
+			} catch {
+				return null; // let esbuild handle it normally
+			}
+		});
+	},
+};
+
+const esbuildKit10Plugin: esbuild.Plugin = {
 	name: 'kit10',
 	setup(build) {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onResolve({ filter: /.*/ }, (args) => {
-			if (isFileImportSpecifier(args.path)) {
+			if (describeImportSpecifier(args.path).local) {
 				const path =
 					args.importer.length === 0
 						? args.path
@@ -73,7 +95,6 @@ const esbuildPlugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onLoad({ filter: /.*/, namespace: 'artifact' }, async (args) => {
-			// if (!isFileImportSpecifier(args.path)) {
 			if (!args.path.startsWith(buildOptions.source_path)) {
 				return;
 			}
@@ -132,7 +153,7 @@ export async function bundle(): Promise<void> {
 
 	const esbuild_options = {
 		absWorkingDir: buildOptions.source_path,
-		plugins: [esbuildPlugin],
+		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
 		entryPoints: [
 			nodePath.join(buildOptions.source_path, SENTINEL_PATH),
 			...paths,

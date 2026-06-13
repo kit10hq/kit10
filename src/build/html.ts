@@ -102,7 +102,7 @@ async function finalizeHtmlOne(artifact: Artifact) {
 			let script_contents: string | undefined;
 			if (
 				style_metadata.inline
-				|| dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+				// || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
 			) {
 				// oxlint-disable-next-line no-await-in-loop
 				script_contents = await dependencyArtifact.text();
