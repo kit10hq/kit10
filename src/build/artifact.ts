@@ -3,6 +3,7 @@ import nodePath from 'node:path';
 import { inspect } from 'node:util';
 import { createId } from '../utils.js';
 import { createDirectory } from './fs/directory.js';
+import { EXT_COMPRESS, gzip } from './fs/gzip.js';
 import * as buildOptions from './options.js';
 import { resolveProjectPath } from './utils.js';
 
@@ -284,16 +285,31 @@ export class Artifact {
 			this.#project_path,
 		);
 
-		if (this.#content === null) {
+		let gzip_size: number | undefined;
+		if (
+			this.#content === null
+			&& !buildOptions.is_prod
+			&& EXT_COMPRESS.has(this.ext) !== true
+		) {
 			await fs.cp(this.absolute_path, output_path);
 		} else {
-			const contents = await this.bytes();
-			await fs.writeFile(output_path, contents);
+			const content = await this.bytes();
+			const promises: Promise<unknown>[] = [fs.writeFile(output_path, content)];
+			if (buildOptions.is_prod) {
+				promises.push(gzip(content, output_path + '.gz'));
+			}
+
+			const [, gzip_result] = await Promise.all(promises);
+			if (typeof gzip_result === 'number') {
+				gzip_size = gzip_result;
+			}
 		}
 
 		flushed_table.push({
 			filename: this.#project_path,
-			size: String(this.sizeUnsafe).padStart(6),
+			size: String(this.sizeUnsafe).padStart(7),
+			gzip_size:
+				gzip_size === undefined ? undefined : String(gzip_size).padStart(9),
 		});
 	}
 

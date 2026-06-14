@@ -20,10 +20,10 @@ if (command === "dev") if (process.argv.includes("--watch")) {
 		runBuild();
 	});
 } else {
-	await import("./build-DMRJXeWv.mjs");
+	await import("./build-BHKFBQwq.mjs");
 	await import(output_path + "/main.js");
 }
-else if (command === "build") await import("./build-DMRJXeWv.mjs");
+else if (command === "build") await import("./build-BHKFBQwq.mjs");
 else {
 	console.error(`Unknown command "${command}".`);
 	process.exit(1);

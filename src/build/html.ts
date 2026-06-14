@@ -3,6 +3,7 @@
 import { escapeAttributeValue, type Promisable } from '../utils.js';
 import type { Artifact } from './artifact.js';
 import * as artifacts from './artifact.js';
+import { minifyHtml } from './html/minify.js';
 import { type ElementMetadata, parseHtml } from './html/parse.js';
 import { templateArtifact, wrapInTemplate } from './html/template.js';
 import * as buildOptions from './options.js';
@@ -99,7 +100,7 @@ async function finalizeHtmlOne(artifact: Artifact) {
 		contents = contents.replaceAll(search, replace);
 	}
 
-	artifact.update(contents);
+	artifact.update(buildOptions.is_prod ? minifyHtml(contents) : contents);
 }
 
 /** Returns the replacement script tag for the given dependency artifact. */

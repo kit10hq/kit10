@@ -3,13 +3,15 @@ import { readdirSync } from "node:fs";
 import nodePath from "node:path";
 import * as fs$2 from "node:fs/promises";
 import fs$1 from "node:fs/promises";
-import { inspect } from "node:util";
+import { inspect, promisify } from "node:util";
 import { customAlphabet } from "nanoid";
+import zlib from "node:zlib";
 import { createPathsMatcher, getTsconfig } from "get-tsconfig";
 import * as esbuild from "esbuild";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
+import { minify } from "@minify-html/node";
 //#region src/utils.ts
 const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
 customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
@@ -56,6 +58,24 @@ async function clearDistDirectory() {
 	const promises = [];
 	for (const entry of entries) promises.push(fs$2.rm(nodePath.join(output_path, entry.name), { recursive: true }));
 	await Promise.all(promises);
+}
+//#endregion
+//#region src/build/fs/gzip.ts
+const zlib_gzip = promisify(zlib.gzip);
+const EXT_COMPRESS = new Set([
+	"html",
+	"css",
+	"js",
+	"json",
+	"svg",
+	"xml",
+	"txt"
+]);
+/** Compresses the given content using gzip and writes it to the specified path. */
+async function gzip(content, path) {
+	const content_gzipped = await zlib_gzip(content, { level: 9 });
+	await fs$1.writeFile(path, content_gzipped);
+	return content_gzipped.byteLength;
 }
 //#endregion
 //#region src/build/utils.ts
@@ -236,14 +256,19 @@ var Artifact = class Artifact {
 		if (this.#is_flushed) return;
 		this.#is_flushed = true;
 		const output_path = nodePath.join(output_static_path, this.#project_path);
-		if (this.#content === null) await fs$1.cp(this.absolute_path, output_path);
+		let gzip_size;
+		if (this.#content === null && !is_prod && EXT_COMPRESS.has(this.ext) !== true) await fs$1.cp(this.absolute_path, output_path);
 		else {
-			const contents = await this.bytes();
-			await fs$1.writeFile(output_path, contents);
+			const content = await this.bytes();
+			const promises = [fs$1.writeFile(output_path, content)];
+			if (is_prod) promises.push(gzip(content, output_path + ".gz"));
+			const [, gzip_result] = await Promise.all(promises);
+			if (typeof gzip_result === "number") gzip_size = gzip_result;
 		}
 		flushed_table.push({
 			filename: this.#project_path,
-			size: String(this.sizeUnsafe).padStart(6)
+			size: String(this.sizeUnsafe).padStart(7),
+			gzip_size: gzip_size === void 0 ? void 0 : String(gzip_size).padStart(9)
 		});
 	}
 	toString() {
@@ -643,6 +668,29 @@ function wrapInTemplate(pageHtmlParsed) {
 	];
 }
 //#endregion
+//#region src/build/html/minify.ts
+const MINIFY_HTML_OPTIONS = {
+	allow_noncompliant_unquoted_attribute_values: false,
+	allow_optimal_entities: false,
+	allow_removing_spaces_between_attributes: false,
+	keep_closing_tags: false,
+	keep_comments: false,
+	keep_html_and_head_opening_tags: true,
+	keep_input_type_text_attr: true,
+	keep_ssi_comments: false,
+	minify_css: false,
+	minify_doctype: false,
+	minify_js: false,
+	preserve_brace_template_syntax: false,
+	preserve_chevron_percent_template_syntax: false,
+	remove_bangs: true,
+	remove_processing_instructions: true
+};
+/** Minifies HTML artifact. */
+function minifyHtml(content) {
+	return minify(Buffer.from(content), MINIFY_HTML_OPTIONS);
+}
+//#endregion
 //#region src/build/html.ts
 /** Compiles non-HTML artifacts to HTML using plugins. */
 async function compileToHtml() {
@@ -695,7 +743,7 @@ async function finalizeHtmlOne(artifact) {
 	}
 	const replacements = await Promise.all(promises);
 	for (const [search, replace] of replacements) contents = contents.replaceAll(search, replace);
-	artifact.update(contents);
+	artifact.update(is_prod ? minifyHtml(contents) : contents);
 }
 /** Returns the replacement script tag for the given dependency artifact. */
 async function computeReplacementScript(artifact, dependencyArtifact) {

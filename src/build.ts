@@ -28,11 +28,6 @@ await bundle();
 
 await finalizeHtml();
 templateArtifact.delete();
-// TODO: minify html
-
-// TODO: gzip
-
-// artifacts.print();
 
 await artifacts.flush();
 await flushRouter();
