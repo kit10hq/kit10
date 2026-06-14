@@ -10,6 +10,8 @@ export type HtmlParsed = {
 	html: ArtifactContent[];
 };
 export type ElementMetadata = {
+	element?: string;
+	attr_path?: string;
 	inline: boolean;
 	attributes?: Map<string, string>;
 };
@@ -58,6 +60,12 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 	rewriter.on('kit10\\:page', {
 		element(element) {
 			element.replace(PAGE_PLACEHOLDER, { html: true });
+		},
+	});
+
+	rewriter.on('head', {
+		element(element) {
+			element.append(HEAD_PLACEHOLDER, { html: true });
 		},
 	});
 
@@ -174,20 +182,32 @@ export async function parseHtml(artifact: Artifact): Promise<HtmlParsed> {
 		},
 	});
 
-	rewriter.on('head', {
+	rewriter.on('img', {
 		element(element) {
-			element.append(HEAD_PLACEHOLDER, { html: true });
+			const attr_src = element.getAttribute('src');
+			if (attr_src !== null) {
+				// ignore https:// etc.
+				if (describeImportSpecifier(attr_src, 'html').local !== true) {
+					return;
+				}
+
+				const attributes = new Map(element.attributes);
+				attributes.delete('kit10:inline');
+				attributes.delete('src');
+
+				const elementArtifact = artifact.create(attr_src);
+				elementArtifact.meta.element = {
+					element: 'img',
+					inline: element.getAttribute('kit10:inline') !== null,
+					attributes,
+				} satisfies ElementMetadata;
+
+				element.replace(`<!--${elementArtifact.id}-->`, { html: true });
+
+				artifacts.collections.bundle.add(elementArtifact);
+			}
 		},
 	});
-
-	// rewriter.on('img', {
-	// 	element(node) {
-	// 		const import_path = node.getAttribute('src');
-	// 		if (import_path) {
-	// 			node.setAttribute('src', absolutePath(dir, import_path));
-	// 		}
-	// 	},
-	// });
 
 	rewriter.write(await artifact.bytes());
 	rewriter.end();

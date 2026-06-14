@@ -7,27 +7,35 @@
 	},
 	"type": "module",
 	"bin": "./dist/main.mjs",
-	"types": "./dist/main.d.mts",
-	"main": "./dist/main.mjs",
+	"exports": {
+		".": {
+			"types": "./dist/main.d.mts",
+			"import": "./dist/main.mjs"
+		},
+		"./hono": "./dist/reexports/hono.mjs",
+		"./ws": "./dist/reexports/ws.mjs"
+	},
 	"engines": {
 		"node": ">=22.16"
 	},
 	"dependencies": {
+		"@hono/node-server": "2.0.4",
 		"@minify-html/node": "0.18.1",
 		"browserslist": "4.28.2",
 		"esbuild": "0.28.0",
 		"get-tsconfig": "4.14.0",
+		"hono": "4.12.23",
 		"html-rewriter-wasm": "0.4.1",
 		"lightningcss": "1.32.0",
-		"nanoid": "5.1.11"
+		"nanoid": "5.1.11",
+		"ws": "8.21.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.10",
-		"@hono/node-server": "2.0.4",
 		"@kirick/lint": "0.3.2",
 		"@types/node": "22.15.13",
+		"@types/ws": "8.18.1",
 		"eslint": "10.2.0",
-		"hono": "4.12.23",
 		"oxlint": "1.58.0",
 		"publint": "0.3.21",
 		"tsdown": "0.22.0",
@@ -35,7 +43,7 @@
 		"unplugin-unused": "0.5.7"
 	},
 	"scripts": {
-		"build": "tsdown src/main.ts --unused --dts --format esm",
+		"build": "tsdown src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
 		"check": "bun run lint && bun run build",
 		"lint": "biome format && oxlint && eslint . && tsc",
 		"pack": "bun run check && dev pack create"

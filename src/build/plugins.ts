@@ -1,8 +1,8 @@
+import type { Promisable } from '../utils.js';
 import type { Artifact } from './artifact.js';
 import * as buildOptions from './options.js';
 import { cssPlugin } from './plugins/css.js';
 
-type Promisable<T> = T | Promise<T>;
 export type Plugin = {
 	filter: '*' | RegExp;
 	transform: (

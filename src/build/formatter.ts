@@ -5,7 +5,7 @@ import * as buildOptions from './options.js';
 /** Formats output files. Useful for development builds. */
 export async function formatOutput() {
 	const biome_config_string = await fs.readFile(
-		nodePath.join(import.meta.dirname, '..', 'biome.json'),
+		nodePath.join(import.meta.dirname, '../biome.json'),
 		'utf8',
 	);
 	const biome_config = JSON.parse(biome_config_string);

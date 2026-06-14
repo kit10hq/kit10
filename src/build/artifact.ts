@@ -25,6 +25,7 @@ const dependents: Map<Artifact, Set<Artifact>> = new Map<
 >();
 
 const flushed_table: Record<string, unknown>[] = [];
+export const link_headers: Record<string, string> = {};
 
 // const SYMBOL: unique symbol = Symbol('Artifact');
 
@@ -320,8 +321,27 @@ async function flushOne(artifact: Artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));
 
 	const promises = [artifact.flush()];
+	const link_header_parts: string[] = [];
 	for (const dependencyArtifact of artifact.dependencies) {
 		promises.push(flushOne(dependencyArtifact));
+
+		switch (dependencyArtifact.ext) {
+			case 'js':
+				link_header_parts.push(
+					`</${encodeURI(dependencyArtifact.project_path)}>; rel=modulepreload`,
+				);
+				break;
+			case 'css':
+				link_header_parts.push(
+					`</${encodeURI(dependencyArtifact.project_path)}>; rel=preload; as=style`,
+				);
+				break;
+			// no default
+		}
+	}
+
+	if (link_header_parts.length > 0) {
+		link_headers[artifact.project_path] = link_header_parts.join(', ');
 	}
 
 	await Promise.all(promises);

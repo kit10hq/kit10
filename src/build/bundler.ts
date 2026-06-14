@@ -49,6 +49,8 @@ function getLoaderByFilePath(path: string): Loader | undefined {
 			return 'text';
 		// no default
 	}
+
+	return 'copy';
 }
 
 const esbuildTsJsResolverPlugin: esbuild.Plugin = {

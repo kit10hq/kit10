@@ -1,7 +1,8 @@
-import { a as project_path, i as output_static_path, n as is_prod, o as source_path, r as output_path, t as config } from "./options-CUPAJ8kq.mjs";
+import { a as project_path, i as output_static_path, n as is_prod, o as server_runtime, r as output_path, s as source_path, t as config } from "./options-Do8UdpP0.mjs";
+import { readdirSync } from "node:fs";
 import nodePath from "node:path";
-import * as fs$1 from "node:fs/promises";
-import fs from "node:fs/promises";
+import * as fs$2 from "node:fs/promises";
+import fs$1 from "node:fs/promises";
 import { inspect } from "node:util";
 import { customAlphabet } from "nanoid";
 import { createPathsMatcher, getTsconfig } from "get-tsconfig";
@@ -9,7 +10,6 @@ import * as esbuild from "esbuild";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
-import { readdirSync } from "node:fs";
 //#region src/utils.ts
 const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
 customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
@@ -37,7 +37,7 @@ function createDirectory(project_dir) {
 	if (directories_creating.has(project_dir)) return directories_creating.get(project_dir);
 	const project_dir_list = getDirectories(project_dir);
 	const output_dir = project_dir === "." ? output_static_path : nodePath.join(output_static_path, project_dir);
-	const promise = fs$1.mkdir(output_dir, { recursive: true });
+	const promise = fs$2.mkdir(output_dir, { recursive: true });
 	for (const dir of project_dir_list) directories_creating.set(dir, promise);
 	promise.then(() => {
 		for (const dir of project_dir_list) {
@@ -51,10 +51,10 @@ function createDirectory(project_dir) {
 async function clearDistDirectory() {
 	directories_created.clear();
 	directories_creating.clear();
-	await fs$1.mkdir(output_path, { recursive: true });
-	const entries = await fs$1.readdir(output_path, { withFileTypes: true });
+	await fs$2.mkdir(output_path, { recursive: true });
+	const entries = await fs$2.readdir(output_path, { withFileTypes: true });
 	const promises = [];
-	for (const entry of entries) promises.push(fs$1.rm(nodePath.join(output_path, entry.name), { recursive: true }));
+	for (const entry of entries) promises.push(fs$2.rm(nodePath.join(output_path, entry.name), { recursive: true }));
 	await Promise.all(promises);
 }
 //#endregion
@@ -103,6 +103,7 @@ const collections = {
 const dependencies = /* @__PURE__ */ new Map();
 const dependents = /* @__PURE__ */ new Map();
 const flushed_table = [];
+const link_headers = {};
 var Artifact = class Artifact {
 	id = createId(36);
 	#project_path;
@@ -173,7 +174,7 @@ var Artifact = class Artifact {
 		return new Set(dependencies.get(this));
 	}
 	#load() {
-		if (this.#content === null) return fs.readFile(this.absolute_path).then((content) => {
+		if (this.#content === null) return fs$1.readFile(this.absolute_path).then((content) => {
 			this.#content = [content];
 		});
 	}
@@ -235,10 +236,10 @@ var Artifact = class Artifact {
 		if (this.#is_flushed) return;
 		this.#is_flushed = true;
 		const output_path = nodePath.join(output_static_path, this.#project_path);
-		if (this.#content === null) await fs.cp(this.absolute_path, output_path);
+		if (this.#content === null) await fs$1.cp(this.absolute_path, output_path);
 		else {
 			const contents = await this.bytes();
-			await fs.writeFile(output_path, contents);
+			await fs$1.writeFile(output_path, contents);
 		}
 		flushed_table.push({
 			filename: this.#project_path,
@@ -261,7 +262,19 @@ var Artifact = class Artifact {
 async function flushOne(artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));
 	const promises = [artifact.flush()];
-	for (const dependencyArtifact of artifact.dependencies) promises.push(flushOne(dependencyArtifact));
+	const link_header_parts = [];
+	for (const dependencyArtifact of artifact.dependencies) {
+		promises.push(flushOne(dependencyArtifact));
+		switch (dependencyArtifact.ext) {
+			case "js":
+				link_header_parts.push(`</${encodeURI(dependencyArtifact.project_path)}>; rel=modulepreload`);
+				break;
+			case "css":
+				link_header_parts.push(`</${encodeURI(dependencyArtifact.project_path)}>; rel=preload; as=style`);
+				break;
+		}
+	}
+	if (link_header_parts.length > 0) link_headers[artifact.project_path] = link_header_parts.join(", ");
 	await Promise.all(promises);
 }
 /** Writes all artifacts to disk. */
@@ -333,6 +346,7 @@ function getLoaderByFilePath(path) {
 		case "css": return "css";
 		case "txt": return "text";
 	}
+	return "copy";
 }
 const esbuildTsJsResolverPlugin = {
 	name: "ts-js-resolver",
@@ -340,7 +354,7 @@ const esbuildTsJsResolverPlugin = {
 		build.onResolve({ filter: /^\..*\.js$/ }, async (args) => {
 			const tsPath = nodePath.resolve(args.resolveDir, args.path.replace(/\.js$/u, ".ts"));
 			try {
-				await fs.access(tsPath);
+				await fs$1.access(tsPath);
 				return { path: tsPath };
 			} catch {
 				return null;
@@ -461,15 +475,15 @@ function processMetafile(esbuild_options, metafile) {
 //#region src/build/formatter.ts
 /** Formats output files. Useful for development builds. */
 async function formatOutput() {
-	const biome_config_string = await fs.readFile(nodePath.join(import.meta.dirname, "..", "biome.json"), "utf8");
+	const biome_config_string = await fs$1.readFile(nodePath.join(import.meta.dirname, "../biome.json"), "utf8");
 	const biome_config = JSON.parse(biome_config_string);
 	delete biome_config.vcs;
 	biome_config.files.includes = ["**"];
 	const config_path = nodePath.join(output_path, "biome.json");
-	await fs.writeFile(config_path, JSON.stringify(biome_config));
+	await fs$1.writeFile(config_path, JSON.stringify(biome_config));
 	const { execSync } = await import("node:child_process");
 	execSync("biome format --write", { cwd: output_path });
-	await fs.rm(config_path);
+	await fs$1.rm(config_path);
 }
 //#endregion
 //#region src/build/html/parse.ts
@@ -502,6 +516,9 @@ async function parseHtml(artifact) {
 	} });
 	rewriter.on("kit10\\:page", { element(element) {
 		element.replace(PAGE_PLACEHOLDER, { html: true });
+	} });
+	rewriter.on("head", { element(element) {
+		element.append(HEAD_PLACEHOLDER, { html: true });
 	} });
 	let unitedScriptArtifact;
 	rewriter.on("script", { element(element) {
@@ -568,8 +585,22 @@ async function parseHtml(artifact) {
 			collections.bundle.add(linkArtifact);
 		}
 	} });
-	rewriter.on("head", { element(element) {
-		element.append(HEAD_PLACEHOLDER, { html: true });
+	rewriter.on("img", { element(element) {
+		const attr_src = element.getAttribute("src");
+		if (attr_src !== null) {
+			if (describeImportSpecifier(attr_src, "html").local !== true) return;
+			const attributes = new Map(element.attributes);
+			attributes.delete("kit10:inline");
+			attributes.delete("src");
+			const elementArtifact = artifact.create(attr_src);
+			elementArtifact.meta.element = {
+				element: "img",
+				inline: element.getAttribute("kit10:inline") !== null,
+				attributes
+			};
+			element.replace(`<!--${elementArtifact.id}-->`, { html: true });
+			collections.bundle.add(elementArtifact);
+		}
 	} });
 	rewriter.write(await artifact.bytes());
 	rewriter.end();
@@ -584,16 +615,20 @@ async function parseHtml(artifact) {
 const HEAD_PLACEHOLDER = `<!--${createId(36)}-->`;
 const PAGE_PLACEHOLDER = `<!--${createId(36)}-->`;
 const artifact = new Artifact("+template.html");
+const kit10_devserver_client_contents = await fs$1.readFile(nodePath.join(import.meta.dirname, "../client/main.js"), "utf8");
 /** Prepares the +template.html file by parsing it and splitting into parts to easy wrapping. */
 async function prepareTemplate() {
 	const htmlParsed = await parseHtml(artifact);
 	let parts = (await new Blob(htmlParsed.html).text()).split(HEAD_PLACEHOLDER);
-	const part_0 = parts[0];
+	let part_0 = parts[0];
+	if (!is_prod) part_0 += `<script type="module">${kit10_devserver_client_contents}<\/script>`;
 	parts = parts[1].split(PAGE_PLACEHOLDER);
+	const part_1 = parts[0];
+	const part_2 = parts[1];
 	return [
 		part_0,
-		parts[0],
-		parts[1]
+		part_1,
+		part_2
 	];
 }
 const template_parts = await prepareTemplate();
@@ -653,6 +688,10 @@ async function finalizeHtmlOne(artifact) {
 			promises.push(computeReplacementStyle(artifact, dependencyArtifact));
 			continue;
 		}
+		if (dependencyArtifact.meta.element) {
+			promises.push(computeReplacementElement(artifact, dependencyArtifact));
+			continue;
+		}
 	}
 	const replacements = await Promise.all(promises);
 	for (const [search, replace] of replacements) contents = contents.replaceAll(search, replace);
@@ -703,6 +742,15 @@ async function computeReplacementStyle(artifact, dependencyArtifact) {
 	}
 	return [`<!--${dependencyArtifact.id}-->`, tag];
 }
+/** Returns the replacement style tag for the given dependency artifact. */
+function computeReplacementElement(artifact, dependencyArtifact) {
+	const metadata = dependencyArtifact.meta.element;
+	let tag = "";
+	tag += `<${metadata.element} src="/${dependencyArtifact.project_path}"`;
+	if (metadata.attributes) for (const [key, value] of metadata.attributes) tag += ` ${key}="${escapeAttributeValue(value)}"`;
+	tag += ">";
+	return [`<!--${dependencyArtifact.id}-->`, tag];
+}
 //#endregion
 //#region src/build/router/filename.ts
 const RE_ENTRYPOINT = /^(?<name>.+)\+page\.(?<ext>[a-z]+)$/iu;
@@ -742,7 +790,7 @@ function parseFilename(name) {
 			static_length: 0
 		}
 	}, {
-		route_part: `:${match_optional_catch_all.groups.key}{.+}`,
+		route_part: getCatchAllRoutePart(match_optional_catch_all.groups.key),
 		specificity: {
 			type: 3,
 			static_length: 0
@@ -750,7 +798,7 @@ function parseFilename(name) {
 	}];
 	const match_catch_all = RE_CATCH_ALL.exec(name);
 	if (match_catch_all) return [{
-		route_part: `:${match_catch_all.groups.key}{.+}`,
+		route_part: getCatchAllRoutePart(match_catch_all.groups.key),
 		specificity: {
 			type: 3,
 			static_length: 0
@@ -758,13 +806,13 @@ function parseFilename(name) {
 	}];
 	let has_optional = false;
 	let static_length = name.length;
-	const route_part = name.replaceAll(/(\[([a-z_][\da-z_]*)\]|\[\[([a-z_][\da-z_]*)\]\])([^\da-z_]|$)/giu, (...args) => {
-		static_length -= args[1].length;
-		if (args[3] !== void 0) {
-			has_optional = true;
-			return `:${args[3]}?${args[4]}`;
-		}
-		return `:${args[2]}${args[4]}`;
+	const route_part = name.replaceAll(/\[\[(?<parameter_name>[a-z_][a-z_\d]*)\]\](?<next_char>[^\da-z_]|$)/giu, (substring, parameter_name, next_char) => {
+		static_length -= substring.length - next_char.length;
+		has_optional = true;
+		return `:${getParameterRoutePart(parameter_name, true)}${next_char}`;
+	}).replaceAll(/\[(?<parameter_name>[a-z_][a-z_\d]*)\](?<next_char>[^\da-z_]|$)/giu, (substring, parameter_name, next_char) => {
+		static_length -= substring.length - next_char.length;
+		return `:${getParameterRoutePart(parameter_name, false)}${next_char}`;
 	});
 	if (name !== route_part) return [{
 		route_part,
@@ -781,6 +829,18 @@ function parseFilename(name) {
 		}
 	}];
 	throw new Error(`Invalid filename "${name}".`);
+}
+/** Return route part for parameter. */
+function getParameterRoutePart(name, optional) {
+	if (server_runtime === "hono") return `:${name}${optional ? "?" : ""}`;
+	if (server_runtime === "nginx") return optional ? "(?:[^/]+)?" : "[^/]+";
+	throw new Error(`Unsupported server runtime "${server_runtime}".`);
+}
+/** Return route part for catch-all parameter. */
+function getCatchAllRoutePart(name) {
+	if (server_runtime === "hono") return `:${name}{.+}`;
+	if (server_runtime === "nginx") return `.+`;
+	throw new Error(`Unsupported server runtime "${server_runtime}".`);
 }
 //#endregion
 //#region src/build/router/file-tree.ts
@@ -889,14 +949,34 @@ function processEntrypoints() {
 }
 /** Writes router files to the output directory. */
 async function flushRouter() {
-	await fs.cp(nodePath.join(import.meta.dirname, "../template/hono"), output_path, { recursive: true });
-	{
+	await fs$1.cp(nodePath.join(import.meta.dirname, "../template", server_runtime), output_path, { recursive: true });
+	const server_port = (is_prod ? config.server?.port : null) ?? 3e3;
+	if (server_runtime === "hono") {
 		const app_routes_js = [];
 		for (const [route, artifact] of app_routes.entries()) app_routes_js.push(`app.get('${route}', serveFile('/${artifact.project_path}'));`);
 		const PATH_MAIN = nodePath.join(output_path, "main.js");
-		let contents = await fs.readFile(PATH_MAIN, "utf8");
-		contents = contents.replace("// MARK: app", app_routes_js.join("\n")).replace("port: 0,", `port: ${config.server?.port ?? 3e3},`);
-		await fs.writeFile(PATH_MAIN, contents, "utf8");
+		let contents = await fs$1.readFile(PATH_MAIN, "utf8");
+		contents = contents.replaceAll(/\.\.\/\.\.\/src\/reexports\/(?<name>[a-z]+)\.js/gu, "kit10/$<name>").replace("const LINK_HEADERS = {};", `const LINK_HEADERS = ${JSON.stringify(link_headers)};`).replace("// MARK: app", app_routes_js.join("\n")).replace("port: 0,", `port: ${server_port},`);
+		if (is_prod) while (true) {
+			const index_ws_start = contents.indexOf("// MARK: devserver\n");
+			if (index_ws_start === -1) break;
+			const index_ws_end = contents.indexOf("// MARK: devserver end\n");
+			contents = contents.slice(0, index_ws_start) + contents.slice(index_ws_end + 22);
+		}
+		await fs$1.writeFile(PATH_MAIN, contents, "utf8");
+	} else if (server_runtime === "nginx") {
+		const app_routes_map = [];
+		for (const [route, artifact] of app_routes.entries()) {
+			const nginx_path = `/${artifact.project_path}`;
+			if (`${route}+page.html` === nginx_path || `${route}/index+page.html` === nginx_path) continue;
+			app_routes_map.push(`~^${route}$ ${nginx_path};`);
+		}
+		const config_http_path = nodePath.join(output_path, "http.conf");
+		const config_server_path = nodePath.join(output_path, "server.conf");
+		let [contents_http, contents_server] = await Promise.all([fs$1.readFile(config_http_path, "utf8"), fs$1.readFile(config_server_path, "utf8")]);
+		contents_http = contents_http.replace("# MARK: link headers", Object.entries(link_headers).map(([file, link_header]) => `/${file} ${JSON.stringify(link_header)};`).join("\n	")).replace("# MARK: routes", app_routes_map.join("\n	"));
+		contents_server = contents_server.replace("listen 3000;", `listen ${server_port};`);
+		await Promise.all([fs$1.writeFile(config_http_path, contents_http, "utf8"), fs$1.writeFile(config_server_path, contents_server, "utf8")]);
 	}
 }
 //#endregion
@@ -909,8 +989,8 @@ await processHtml();
 await bundle();
 await finalizeHtml();
 artifact.delete();
-await flushRouter();
 await flush();
+await flushRouter();
 if (!is_prod) await formatOutput();
 /**
 * Format nanoseconds as a human-readable string.

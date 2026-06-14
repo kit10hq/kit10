@@ -1,5 +1,7 @@
 import { customAlphabet } from 'nanoid';
 
+export type Promisable<T> = T | Promise<T>;
+
 export const createId: (size?: number) => string = customAlphabet(
 	'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
 	16,

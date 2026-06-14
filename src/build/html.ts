@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-process-exit
 
-import { escapeAttributeValue } from '../utils.js';
+import { escapeAttributeValue, type Promisable } from '../utils.js';
 import type { Artifact } from './artifact.js';
 import * as artifacts from './artifact.js';
 import { type ElementMetadata, parseHtml } from './html/parse.js';
@@ -67,7 +67,7 @@ type Replacement = [string, string];
 async function finalizeHtmlOne(artifact: Artifact) {
 	let contents = await artifact.text();
 
-	const promises: Promise<Replacement>[] = [];
+	const promises: Promisable<Replacement>[] = [];
 	for (const dependencyArtifact of artifact.dependencies) {
 		const script_metadata = dependencyArtifact.meta.script as
 			| ElementMetadata
@@ -82,6 +82,14 @@ async function finalizeHtmlOne(artifact: Artifact) {
 			| undefined;
 		if (style_metadata) {
 			promises.push(computeReplacementStyle(artifact, dependencyArtifact));
+			continue;
+		}
+
+		const element_metadata = dependencyArtifact.meta.element as
+			| ElementMetadata
+			| undefined;
+		if (element_metadata) {
+			promises.push(computeReplacementElement(artifact, dependencyArtifact));
 			continue;
 		}
 	}
@@ -187,6 +195,27 @@ async function computeReplacementStyle(
 
 		tag += `>${script_contents}</style>`;
 	}
+
+	return [`<!--${dependencyArtifact.id}-->`, tag];
+}
+
+/** Returns the replacement style tag for the given dependency artifact. */
+function computeReplacementElement(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Replacement {
+	const metadata = dependencyArtifact.meta.element as ElementMetadata;
+
+	let tag = '';
+	tag += `<${metadata.element} src="/${dependencyArtifact.project_path}"`;
+
+	if (metadata.attributes) {
+		for (const [key, value] of metadata.attributes) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+	}
+
+	tag += '>';
 
 	return [`<!--${dependencyArtifact.id}-->`, tag];
 }

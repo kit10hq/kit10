@@ -34,8 +34,8 @@ templateArtifact.delete();
 
 // artifacts.print();
 
-await flushRouter();
 await artifacts.flush();
+await flushRouter();
 
 if (!buildOptions.is_prod) {
 	await formatOutput();

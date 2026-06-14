@@ -12,6 +12,8 @@ export type Config = {
 	};
 	/** Server options. */
 	server?: {
+		/** Config for which server to build. */
+		runtime?: 'hono' | 'nginx';
 		/** Port to listen on. */
 		port?: number;
 	};
@@ -25,6 +27,8 @@ const configModule = await import(
 	nodePath.join(process.cwd(), 'kit10.config.js')
 );
 export const config = configModule.default as Config;
+export const server_runtime =
+	(is_prod ? config.server?.runtime : null) ?? ('hono' as const);
 
 export const source_path: string = nodePath.join(process.cwd(), 'src');
 

@@ -48,8 +48,10 @@ declare class Artifact {
   [inspect.custom](): string;
 }
 //#endregion
-//#region src/build/plugins.d.ts
+//#region src/utils.d.ts
 type Promisable<T> = T | Promise<T>;
+//#endregion
+//#region src/build/plugins.d.ts
 type Plugin = {
   filter: '*' | RegExp;
   transform: (artifact: Artifact, options: {
@@ -66,7 +68,8 @@ type Config = {
     /** If script or style size is within this threshold, it will be inlined into page. */inlineTreshold?: number;
   }; /** Server options. */
   server?: {
-    /** Port to listen on. */port?: number;
+    /** Config for which server to build. */runtime?: 'hono' | 'nginx'; /** Port to listen on. */
+    port?: number;
   };
 };
 //#endregion
