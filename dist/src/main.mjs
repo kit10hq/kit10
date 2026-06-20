@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { r as output_path, s as source_path } from "./options-Do8UdpP0.mjs";
+import { a as output_path, n as source_path } from "../options-tBkoHjas.mjs";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 //#region src/main.ts
@@ -20,10 +20,10 @@ if (command === "dev") if (process.argv.includes("--watch")) {
 		runBuild();
 	});
 } else {
-	await import("./build-BHKFBQwq.mjs");
+	await import("../build-VotkMKLs.mjs");
 	await import(output_path + "/main.js");
 }
-else if (command === "build") await import("./build-BHKFBQwq.mjs");
+else if (command === "build") await import("../build-VotkMKLs.mjs");
 else {
 	console.error(`Unknown command "${command}".`);
 	process.exit(1);

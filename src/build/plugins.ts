@@ -1,3 +1,4 @@
+import * as options from '../options.js';
 import type { Promisable } from '../utils.js';
 import type { Artifact } from './artifact.js';
 import * as buildOptions from './options.js';
@@ -31,7 +32,7 @@ export async function applyPlugins(
 				plugin.filter.test(artifact.project_path))
 			) {
 				const result = plugin.transform(artifact, {
-					source_path: buildOptions.source_path,
+					source_path: options.source_path,
 					is_prod: buildOptions.is_prod,
 				});
 				if (result instanceof Promise) {

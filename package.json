@@ -6,14 +6,16 @@
 		"access": "public"
 	},
 	"type": "module",
-	"bin": "./dist/main.mjs",
+	"bin": "./dist/src/main.mjs",
 	"exports": {
 		".": {
-			"types": "./dist/main.d.mts",
-			"import": "./dist/main.mjs"
+			"types": "./dist/src/main.d.mts",
+			"import": "./dist/src/main.mjs"
 		},
-		"./hono": "./dist/reexports/hono.mjs",
-		"./ws": "./dist/reexports/ws.mjs"
+		"./worker/client": "./dist/browser/workers/worker/client.mjs",
+		"./worker/server": "./dist/browser/workers/worker/server.mjs",
+		"./hono": "./dist/src/reexports/hono.mjs",
+		"./ws": "./dist/src/reexports/ws.mjs"
 	},
 	"engines": {
 		"node": ">=22.16"
@@ -28,6 +30,9 @@
 		"html-rewriter-wasm": "0.4.1",
 		"lightningcss": "1.32.0",
 		"nanoid": "5.1.11",
+		"neoevents": "0.3.0",
+		"oxc-parser": "0.133.0",
+		"valibot": "1.4.1",
 		"ws": "8.21.0"
 	},
 	"devDependencies": {
@@ -39,11 +44,12 @@
 		"oxlint": "1.58.0",
 		"publint": "0.3.21",
 		"tsdown": "0.22.0",
+		"type-fest": "5.7.0",
 		"typescript": "6.0.2",
 		"unplugin-unused": "0.5.7"
 	},
 	"scripts": {
-		"build": "tsdown src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
+		"build": "tsdown browser/workers/worker/client.ts browser/workers/worker/server.ts src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
 		"check": "bun run lint && bun run build",
 		"lint": "biome format && oxlint && eslint . && tsc",
 		"pack": "bun run check && dev pack create"

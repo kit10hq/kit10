@@ -1,9 +1,9 @@
 import nodePath from 'node:path';
 import { createPathsMatcher, getTsconfig } from 'get-tsconfig';
-import * as buildOptions from './options.js';
+import * as options from '../options.js';
 
-const tsconfig = getTsconfig(buildOptions.project_path);
-const matchPath = tsconfig ? createPathsMatcher(tsconfig) : undefined;
+const tsconfig = getTsconfig(options.project_path);
+export const matchPath = tsconfig ? createPathsMatcher(tsconfig) : undefined;
 
 /** Checks if path points to a file in the project. */
 export function describeImportSpecifier(
@@ -62,11 +62,10 @@ export function describeImportSpecifier(
 
 		// TS path aliases
 		if (matchPath?.(specifier)?.length) {
-			throw new Error(`Alias paths are not supported: "${specifier}".`);
-			// return {
-			// 	local: true,
-			// 	type: 'alias',
-			// };
+			return {
+				local: true,
+				type: 'alias',
+			};
 		}
 
 		// Bare package specifier

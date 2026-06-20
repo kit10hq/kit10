@@ -1,4 +1,4 @@
-import { a as project_path, i as output_static_path, n as is_prod, o as server_runtime, r as output_path, s as source_path, t as config } from "./options-Do8UdpP0.mjs";
+import { a as output_path, i as is_prod, n as source_path, o as output_static_path, r as config, s as server_runtime, t as project_path } from "./options-tBkoHjas.mjs";
 import { readdirSync } from "node:fs";
 import nodePath from "node:path";
 import * as fs$2 from "node:fs/promises";
@@ -8,6 +8,7 @@ import { customAlphabet } from "nanoid";
 import zlib from "node:zlib";
 import { createPathsMatcher, getTsconfig } from "get-tsconfig";
 import * as esbuild from "esbuild";
+import { parseSync } from "oxc-parser";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
@@ -15,6 +16,7 @@ import { minify } from "@minify-html/node";
 //#region src/utils.ts
 const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
 customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
+const createLetterId = customAlphabet("abcdefghijklmnopqrstuvwxyz", 16);
 /** Returns a safe value for an HTML attribute. */
 function escapeAttributeValue(value) {
 	return value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -97,7 +99,10 @@ function describeImportSpecifier(specifier, mode = "ts") {
 	};
 	if (mode === "ts") {
 		if (specifier.startsWith("#")) throw new Error(`Shebang paths are not supported: "${specifier}".`);
-		if (matchPath?.(specifier)?.length) throw new Error(`Alias paths are not supported: "${specifier}".`);
+		if (matchPath?.(specifier)?.length) return {
+			local: true,
+			type: "alias"
+		};
 		return {
 			local: false,
 			type: "package"
@@ -118,6 +123,7 @@ const all = /* @__PURE__ */ new Map();
 const collections = {
 	pre_html: /* @__PURE__ */ new Set(),
 	html: /* @__PURE__ */ new Set(),
+	entrypoints: /* @__PURE__ */ new Set(),
 	bundle: /* @__PURE__ */ new Set()
 };
 const dependencies = /* @__PURE__ */ new Map();
@@ -283,6 +289,10 @@ var Artifact = class Artifact {
 		return this.toString();
 	}
 };
+/** Returns whether an artifact exists for the given project path. */
+function exists(project_path) {
+	return all.has(project_path);
+}
 /** Writes a single artifact to disk. */
 async function flushOne(artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));
@@ -305,9 +315,219 @@ async function flushOne(artifact) {
 /** Writes all artifacts to disk. */
 async function flush() {
 	const promises = [];
-	for (const artifact of collections.html.values()) promises.push(flushOne(artifact));
+	for (const artifact of collections.entrypoints.values()) promises.push(flushOne(artifact));
 	await Promise.all(promises);
 	console.table(flushed_table);
+}
+//#endregion
+//#region src/build/bundler/options.ts
+const esbuild_options = {
+	absWorkingDir: source_path,
+	outdir: "/",
+	bundle: true,
+	chunkNames: "js/chunks/[hash]",
+	format: "esm",
+	metafile: true,
+	minify: is_prod,
+	write: false
+};
+/** Checks if the given path exists and returns the corresponding TypeScript path if it does. */
+async function jsTsResolver(path) {
+	const path_ts = path.replace(/\.js$/u, ".ts");
+	try {
+		await fs$1.access(path_ts);
+		return path_ts;
+	} catch {}
+}
+const esbuildTsJsResolverPlugin = {
+	name: "ts-js-resolver",
+	setup(build) {
+		build.onResolve({ filter: /\.js$/ }, async (args) => {
+			if (!describeImportSpecifier(args.path).local) return;
+			const path_ts = await jsTsResolver(nodePath.resolve(args.resolveDir, args.path));
+			if (path_ts !== void 0) return { path: path_ts };
+		});
+	}
+};
+/** Resolves import to a file, if it points to source file. */
+async function getAbsolutePathOnResolve(args) {
+	const importSpecifier = describeImportSpecifier(args.path);
+	if (!importSpecifier.local) return;
+	let absolute_path;
+	if (importSpecifier.type === "alias") {
+		const match = matchPath(args.path);
+		if (match.length !== 1) throw new Error(`Kit10 does not support multiple matches for TypeScript aliases (found for "${args.path}").`);
+		if (match[0] === void 0) return;
+		absolute_path = await jsTsResolver(match[0]) ?? match[0];
+	} else absolute_path = args.resolveDir.length === 0 || args.path.startsWith("/") ? args.path : nodePath.join(args.resolveDir, args.path);
+	if (!absolute_path.startsWith(source_path)) return;
+	return absolute_path;
+}
+//#endregion
+//#region src/lib/workers.ts
+/** Imports that used by workers to call window code. */
+const workers_data = /* @__PURE__ */ new Map();
+/** Combined imports from all workers. */
+const workers_imports = /* @__PURE__ */ new Map();
+const WORKERS_DIR = nodePath.join(source_path, "+workers");
+const promises = [];
+for (const entry of await fs$1.readdir(WORKERS_DIR, { withFileTypes: true })) {
+	if (entry.isDirectory() !== true) throw new Error(`Expected directory at "+workers/${entry.name}".`);
+	promises.push(scanWorker(entry.name));
+}
+await Promise.all(promises);
+/** Scans worker files. */
+async function scanWorker(worker_name) {
+	const worker_dir = nodePath.join(WORKERS_DIR, worker_name);
+	const worker_entries = await fs$1.readdir(worker_dir, {
+		withFileTypes: true,
+		recursive: true
+	});
+	const worker_main_absolute_path = nodePath.join(worker_dir, "+worker.ts");
+	const worker_main_project_path = worker_main_absolute_path.slice(source_path.length + 1);
+	workers_data.set(worker_name, {
+		project_path: worker_main_project_path,
+		imports: /* @__PURE__ */ new Map(),
+		exports: /* @__PURE__ */ new Set()
+	});
+	const promises_worker = [];
+	for (const entry of worker_entries) {
+		if (entry.isFile() === false) continue;
+		const absolute_path = nodePath.join(entry.parentPath, entry.name);
+		promises_worker.push(parseWorkerFile(worker_name, absolute_path, worker_main_absolute_path === absolute_path));
+	}
+	await Promise.all(promises_worker);
+}
+/** Parses a worker file. */
+async function parseWorkerFile(worker_name, absolute_path, is_main) {
+	const worker_data = workers_data.get(worker_name);
+	const { module } = parseSync(absolute_path, await fs$1.readFile(absolute_path, "utf8"));
+	for (const import_ of module.staticImports) {
+		let path = import_.moduleRequest.value;
+		if (!path.startsWith("$src/")) continue;
+		path = path.slice(5);
+		for (const import_entry of import_.entries) {
+			if (import_entry.isType) continue;
+			const { name } = import_entry.importName;
+			if (name !== null) {
+				if (!worker_data.imports.has(path)) worker_data.imports.set(path, /* @__PURE__ */ new Set());
+				worker_data.imports.get(path).add(name);
+				if (!workers_imports.has(path)) workers_imports.set(path, /* @__PURE__ */ new Set());
+				workers_imports.get(path).add(name);
+			}
+		}
+	}
+	if (is_main) for (const export_ of module.staticExports) for (const export_entry of export_.entries) {
+		if (export_entry.isType) continue;
+		const { name } = export_entry.exportName;
+		if (name === null) continue;
+		worker_data.exports.add(name);
+	}
+}
+//#endregion
+//#region src/build/bundler/worker.ts
+const worker_files = /* @__PURE__ */ new Map();
+/** Builds worker. */
+async function createWorker(worker_name) {
+	const worker_client_path = `+workers/${worker_name}/+worker.client.js`;
+	const worker_window_path = `+workers/${worker_name}/+worker.window.js`;
+	const worker_data = workers_data.get(worker_name);
+	const in_window_worker_client_lines = [];
+	const in_window_handler_parts = [];
+	for (const [path, specifiers] of worker_data.imports) {
+		const id = createLetterId();
+		const in_window_imports = [];
+		for (const specifier of specifiers) {
+			const specifier_imported = `${id}_${specifier}`;
+			in_window_imports.push(`${specifier} as ${specifier_imported}`);
+			in_window_handler_parts.push(`\t\t${JSON.stringify(`${path}:${specifier}`)}: ${specifier_imported},`);
+		}
+		in_window_worker_client_lines.push(`import { ${in_window_imports.join(", ")} } from '../../${path}';`);
+		buildDollarSrcModule(path);
+	}
+	in_window_worker_client_lines.push(`import { Kit10WorkerClient } from 'kit10/worker/client';`, `const kit10WorkerClient = new Kit10WorkerClient(`, `\t${JSON.stringify(worker_name)},`, `\t${JSON.stringify(`/+workers/${worker_name}/+worker.worker.js`)},`, `\t() => import(${JSON.stringify(`./+worker.window.js`)}),`, `\t{`, ...in_window_handler_parts, `\t},`, `);`);
+	for (const specifier of worker_data.exports) in_window_worker_client_lines.push(`export function ${specifier}(...args) {`, `\treturn kit10WorkerClient.send(${JSON.stringify(specifier)}, args);`, `}`);
+	createWorkerEntrypointFiles(worker_name);
+	worker_files.set(worker_client_path, in_window_worker_client_lines.join("\n"));
+	await bundleWorker(worker_name);
+	return [new Artifact(worker_client_path, worker_files.get(worker_client_path)), new Artifact(worker_window_path, worker_files.get(worker_window_path))];
+}
+/** Build a file that worker will use to send requests to the window. */
+function buildDollarSrcModule(path) {
+	const src_path = `$src/${path}`;
+	if (worker_files.has(src_path)) return;
+	const specifiers = workers_imports.get(path);
+	if (!specifiers) throw new Error(`No imports found for module "${src_path}".`);
+	const lines = [`import { sendReqeustToWindow } from "kit10/worker/server"`];
+	for (const specifier of specifiers) lines.push(`export function ${specifier}(...args) {`, `\treturn sendReqeustToWindow(${JSON.stringify(`${path}:${specifier}`)}, args);`, `}`);
+	worker_files.set(src_path, lines.join("\n"));
+}
+/** Creates entrypoint file for worker, which will be used as "+worker.window.js". */
+function createWorkerEntrypointFiles(worker_name) {
+	const lines = [
+		`import * as handlers from "./+worker.js";`,
+		`import { Kit10WorkerServer } from "kit10/worker/server";`,
+		`const kit10WorkerServer = new Kit10WorkerServer(${JSON.stringify(worker_name)}, handlers);`
+	];
+	worker_files.set(`+workers/${worker_name}/+worker.window.js`, lines.join("\n"));
+	lines.push(`kit10WorkerServer.bindWorker();`);
+	worker_files.set(`+workers/${worker_name}/+worker.worker.js`, lines.join("\n"));
+}
+const esbuildKit10WorkerPlugin = {
+	name: "kit10-worker",
+	setup(build) {
+		build.onResolve({ filter: /.*/ }, async (args) => {
+			if (worker_files.has(args.path)) return {
+				path: args.path,
+				namespace: "worker"
+			};
+			const absolute_path = await getAbsolutePathOnResolve(args);
+			if (absolute_path === void 0) return;
+			return { path: absolute_path };
+		});
+		build.onLoad({
+			filter: /.*/,
+			namespace: "worker"
+		}, (args) => {
+			if (worker_files.has(args.path) !== true) {
+				console.error(`Unknown worker file: ${args.path}`);
+				process.exit(1);
+				return;
+			}
+			let resolve_dir = source_path;
+			if (args.path.endsWith("/+worker.worker.js")) {
+				const match = args.path.match(/^\+workers\/(?<name>[-a-z\d_]+)\//iu);
+				if (!match) {
+					console.error(`Invalid worker entrypoint file: ${args.path}`);
+					process.exit(1);
+					return;
+				}
+				resolve_dir = nodePath.join(source_path, `+workers/${match.groups.name}`);
+			}
+			return {
+				contents: worker_files.get(args.path),
+				loader: "ts",
+				resolveDir: resolve_dir
+			};
+		});
+	}
+};
+/** Bundles worker code into single file. */
+async function bundleWorker(worker_name) {
+	const project_path = `+workers/${worker_name}/+worker.worker.js`;
+	const result = await esbuild.build({
+		...esbuild_options,
+		plugins: [esbuildTsJsResolverPlugin, esbuildKit10WorkerPlugin],
+		entryPoints: [project_path],
+		splitting: false
+	});
+	if (result.outputFiles?.length !== 1) {
+		console.error(`Expected 1 output file, got ${result.outputFiles?.length} (bundleWorker ${worker_name})`);
+		process.exit(1);
+		return;
+	}
+	const artifact = new Artifact(project_path, result.outputFiles[0].contents);
+	collections.entrypoints.add(artifact);
 }
 //#endregion
 //#region src/build/plugins/css.ts
@@ -373,27 +593,20 @@ function getLoaderByFilePath(path) {
 	}
 	return "copy";
 }
-const esbuildTsJsResolverPlugin = {
-	name: "ts-js-resolver",
-	setup(build) {
-		build.onResolve({ filter: /^\..*\.js$/ }, async (args) => {
-			const tsPath = nodePath.resolve(args.resolveDir, args.path.replace(/\.js$/u, ".ts"));
-			try {
-				await fs$1.access(tsPath);
-				return { path: tsPath };
-			} catch {
-				return null;
-			}
-		});
-	}
-};
 const esbuildKit10Plugin = {
 	name: "kit10",
 	setup(build) {
-		build.onResolve({ filter: /.*/ }, (args) => {
-			if (!describeImportSpecifier(args.path).local) return;
-			const absolute_path = args.importer.length === 0 ? args.path : nodePath.join(nodePath.dirname(args.importer), args.path);
-			if (!absolute_path.startsWith(source_path)) return;
+		build.onResolve({ filter: /.*/ }, async (args) => {
+			if (args.path.startsWith("$workers/")) return {
+				path: args.path,
+				namespace: "worker"
+			};
+			if (args.path.startsWith("$src/")) return {
+				path: args.path,
+				namespace: "worker-src"
+			};
+			const absolute_path = await getAbsolutePathOnResolve(args);
+			if (absolute_path === void 0) return;
 			return {
 				path: absolute_path,
 				namespace: "artifact"
@@ -407,8 +620,7 @@ const esbuildKit10Plugin = {
 			const resolveDir = nodePath.dirname(args.path);
 			if (args.path.includes(SENTINEL_PATH)) return {
 				contents: "export default null;",
-				loader: "js",
-				resolveDir
+				loader: "js"
 			};
 			const artifact = new Artifact(args.path.replace(source_path, "").slice(1));
 			tempArtifacts.add(artifact);
@@ -424,6 +636,39 @@ const esbuildKit10Plugin = {
 				resolveDir
 			};
 		});
+		build.onLoad({
+			filter: /.*/,
+			namespace: "worker"
+		}, async (args) => {
+			const match = args.path.match(/^\$workers\/(?<name>[-a-z\d_]+)$/iu);
+			if (!match) {
+				console.error(`Invalid worker import: ${args.path}`);
+				process.exit(1);
+			}
+			const worker_name = match.groups.name;
+			const artifacts_worker = await createWorker(worker_name);
+			for (const artifact of artifacts_worker) tempArtifacts.add(artifact);
+			return {
+				contents: await artifacts_worker[0].text(),
+				loader: "ts",
+				resolveDir: nodePath.join(source_path, "+workers", worker_name)
+			};
+		});
+		build.onLoad({
+			filter: /.*/,
+			namespace: "worker-src"
+		}, (args) => {
+			const contents = worker_files.get(args.path);
+			if (contents === void 0) {
+				console.error(`Invalid worker-src import: ${args.path}`);
+				process.exit(1);
+			}
+			return {
+				contents,
+				loader: "ts",
+				resolveDir: source_path
+			};
+		});
 		build.onEnd(() => {
 			for (const artifact of tempArtifacts) if (!collections.bundle.has(artifact)) artifact.delete();
 		});
@@ -433,33 +678,28 @@ const esbuildKit10Plugin = {
 async function bundle() {
 	const paths = [];
 	for (const artifact of collections.bundle) paths.push(artifact.absolute_path);
-	const esbuild_options = {
-		absWorkingDir: source_path,
+	const result = await esbuild.build({
+		...esbuild_options,
 		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
 		entryPoints: [nodePath.join(source_path, SENTINEL_PATH), ...paths],
-		outdir: "/",
-		bundle: true,
-		chunkNames: "js/chunks/[hash]",
-		format: "esm",
-		metafile: true,
-		minify: is_prod,
-		splitting: true,
-		write: false
-	};
-	const result = await esbuild.build(esbuild_options);
+		splitting: true
+	});
 	if (result.errors.length > 0) {
 		console.error("esbuild errors:");
 		for (const error of result.errors) console.error(error.text);
 		process.exit(1);
 	}
-	const metafile = processMetafile(esbuild_options, result.metafile);
+	const metafile = processMetafile(result.metafile);
 	for (const output of result.outputFiles) {
 		if (output.path.includes(SENTINEL_PATH)) continue;
 		const output_project_path = output.path.slice(1);
 		const meta = metafile.get(output_project_path);
 		if (meta === void 0) throw new Error(`No metafile entry found for ${output_project_path}.`);
-		const artifact = new Artifact(meta.project_path ?? output_project_path);
-		if (artifact.project_path !== output_project_path) artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1));
+		let artifact;
+		if (meta.project_path !== void 0 && exists(meta.project_path)) {
+			artifact = new Artifact(meta.project_path);
+			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1));
+		} else artifact = new Artifact(output_project_path);
 		artifact.update(output.contents);
 		collections.bundle.add(artifact);
 	}
@@ -472,7 +712,7 @@ async function bundle() {
 	}
 }
 /** Processes the esbuild metafile. */
-function processMetafile(esbuild_options, metafile) {
+function processMetafile(metafile) {
 	const result = /* @__PURE__ */ new Map();
 	const output_prefix = nodePath.relative(esbuild_options.absWorkingDir, esbuild_options.outdir) + "/";
 	const output_entrypoint_prefix = `artifact:${esbuild_options.absWorkingDir}/`;
@@ -484,7 +724,6 @@ function processMetafile(esbuild_options, metafile) {
 		if (output.entryPoint !== void 0) {
 			if (output.entryPoint.startsWith(output_entrypoint_prefix) !== true) throw new Error(`Esbuild entrypoint "${output.entryPoint}" does not start with "${output_entrypoint_prefix}": ${output.entryPoint}`);
 			project_path = output.entryPoint.slice(output_entrypoint_prefix.length);
-			if (nodePath.dirname(output_project_path) !== nodePath.dirname(project_path)) throw new Error(`Esbuild moved "${project_path}" to "${output_project_path}", which is in another directory. This should not happen.`);
 		}
 		result.set(output_project_path, {
 			project_path,
@@ -640,20 +879,16 @@ async function parseHtml(artifact) {
 const HEAD_PLACEHOLDER = `<!--${createId(36)}-->`;
 const PAGE_PLACEHOLDER = `<!--${createId(36)}-->`;
 const artifact = new Artifact("+template.html");
-const kit10_devserver_client_contents = await fs$1.readFile(nodePath.join(import.meta.dirname, "../client/main.js"), "utf8");
 /** Prepares the +template.html file by parsing it and splitting into parts to easy wrapping. */
 async function prepareTemplate() {
 	const htmlParsed = await parseHtml(artifact);
 	let parts = (await new Blob(htmlParsed.html).text()).split(HEAD_PLACEHOLDER);
-	let part_0 = parts[0];
-	if (!is_prod) part_0 += `<script type="module">${kit10_devserver_client_contents}<\/script>`;
+	const part_0 = parts[0];
 	parts = parts[1].split(PAGE_PLACEHOLDER);
-	const part_1 = parts[0];
-	const part_2 = parts[1];
 	return [
 		part_0,
-		part_1,
-		part_2
+		parts[0],
+		parts[1]
 	];
 }
 const template_parts = await prepareTemplate();
@@ -713,7 +948,10 @@ async function processOneHtml(artifact$1) {
 /** Extracts resources (script, style, link, etc) from HTML, wraps HTML content with a common template... */
 async function processHtml() {
 	const promises = [];
-	for (const artifact of collections.html) promises.push(processOneHtml(artifact));
+	for (const artifact of collections.html) {
+		promises.push(processOneHtml(artifact));
+		collections.entrypoints.add(artifact);
+	}
 	await Promise.all(promises);
 }
 const INLINE_TRESHOLD = config.build?.inlineTreshold ?? 2e3;

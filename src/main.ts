@@ -4,7 +4,8 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
-import { output_path, source_path } from './build/options.js';
+import { output_path } from './build/options.js';
+import { source_path } from './options.js';
 
 let child: ChildProcess | undefined;
 /** Runs the build in separate process. */

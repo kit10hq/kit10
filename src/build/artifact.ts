@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { inspect } from 'node:util';
+import * as options from '../options.js';
 import { createId } from '../utils.js';
 import { createDirectory } from './fs/directory.js';
 import { EXT_COMPRESS, gzip } from './fs/gzip.js';
@@ -13,6 +14,7 @@ const all: Map<string, Artifact> = new Map<string, Artifact>();
 export const collections = {
 	pre_html: new Set<Artifact>(),
 	html: new Set<Artifact>(),
+	entrypoints: new Set<Artifact>(),
 	bundle: new Set<Artifact>(),
 };
 
@@ -129,7 +131,7 @@ export class Artifact {
 	}
 
 	get absolute_path(): string {
-		return nodePath.join(buildOptions.source_path, this.#project_path);
+		return nodePath.join(options.source_path, this.#project_path);
 	}
 
 	get filename(): string {
@@ -272,11 +274,8 @@ export class Artifact {
 	/** Writes the artifact to disk. */
 	async flush(): Promise<void> {
 		if (this.#is_flushed) {
-			// console.log('[Artifact#flush] already flushed', this.project_path);
 			return;
 		}
-
-		// console.log('[Artifact#flush] flushing', this.project_path, '...');
 
 		this.#is_flushed = true;
 
@@ -367,7 +366,7 @@ async function flushOne(artifact: Artifact) {
 export async function flush(): Promise<void> {
 	const promises = [];
 	// for (const artifact of all.values()) {
-	for (const artifact of collections.html.values()) {
+	for (const artifact of collections.entrypoints.values()) {
 		promises.push(flushOne(artifact));
 	}
 

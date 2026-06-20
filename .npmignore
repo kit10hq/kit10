@@ -1,5 +1,7 @@
 # ignore source files of the Typescript project
 src/
+browser/
+!dist/**
 
 # ignore tests
 **/*.test.*

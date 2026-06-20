@@ -45,6 +45,8 @@ export async function processHtml() {
 	const promises = [];
 	for (const artifact of artifacts.collections.html) {
 		promises.push(processOneHtml(artifact));
+
+		artifacts.collections.entrypoints.add(artifact);
 	}
 
 	await Promise.all(promises);

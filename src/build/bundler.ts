@@ -1,19 +1,19 @@
 // oxlint-disable unicorn/no-process-exit
 
-import fs from 'node:fs/promises';
 import nodePath from 'node:path';
-import type { BuildOptions, Loader, Metafile, OnLoadArgs } from 'esbuild';
+import type { Loader, Metafile, OnLoadArgs } from 'esbuild';
 import * as esbuild from 'esbuild';
+import * as options from '../options.js';
 import { createId } from '../utils.js';
 import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
-import * as buildOptions from './options.js';
+import {
+	esbuild_options,
+	esbuildTsJsResolverPlugin,
+	getAbsolutePathOnResolve,
+} from './bundler/options.js';
+import { createWorker, worker_files } from './bundler/worker.js';
 import { applyPlugins } from './plugins.js';
-import { describeImportSpecifier } from './utils.js';
-
-// make type from BuildOptions that requires properties absWorkingDir and outdir
-type Kit10EsbuildOpions = BuildOptions &
-	Required<Pick<BuildOptions, 'absWorkingDir' | 'outdir'>> & { metafile: true };
 
 const SENTINEL_PATH = `${createId()}.js`;
 
@@ -53,57 +53,37 @@ function getLoaderByFilePath(path: string): Loader | undefined {
 	return 'copy';
 }
 
-const esbuildTsJsResolverPlugin: esbuild.Plugin = {
-	name: 'ts-js-resolver',
-	setup(build) {
-		// With "u" flag, we get "filter is not a valid Go regular expression" error
-		// eslint-disable-next-line require-unicode-regexp
-		build.onResolve({ filter: /^\..*\.js$/ }, async (args) => {
-			const tsPath = nodePath.resolve(
-				args.resolveDir,
-				args.path.replace(/\.js$/u, '.ts'),
-			);
-
-			try {
-				await fs.access(tsPath);
-				return { path: tsPath };
-			} catch {
-				return null; // let esbuild handle it normally
-			}
-		});
-	},
-};
-
 const esbuildKit10Plugin: esbuild.Plugin = {
 	name: 'kit10',
 	setup(build) {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
-		build.onResolve({ filter: /.*/ }, (args) => {
+		build.onResolve({ filter: /.*/ }, async (args) => {
 			// console.log(
 			// 	'[esbuild]',
 			// 	'[onResolve]',
 			// 	args,
-			// 	describeImportSpecifier(args.path),
+			// 	// describeImportSpecifier(args.path),
 			// );
 
-			// ignore if imported path does not point to a local file
-			if (!describeImportSpecifier(args.path).local) {
-				return;
+			if (args.path.startsWith('$workers/')) {
+				return {
+					path: args.path,
+					namespace: 'worker',
+				};
 			}
 
-			const absolute_path =
-				args.importer.length === 0
-					? args.path
-					: nodePath.join(nodePath.dirname(args.importer), args.path);
-			// ignore all files that are not from the source path
-			if (!absolute_path.startsWith(buildOptions.source_path)) {
-				return;
+			if (args.path.startsWith('$src/')) {
+				return {
+					path: args.path,
+					namespace: 'worker-src',
+				};
 			}
 
-			// we should not ignore anything else (for example, non-artifact files), because esbuild should support any files we import.
-			// in project source directory, any files can exist. we need to compile them with user plugins.
-			// outside, all files should be conventional, that esbuild support natively.
+			const absolute_path = await getAbsolutePathOnResolve(args);
+			if (absolute_path === undefined) {
+				return;
+			}
 
 			return {
 				path: absolute_path,
@@ -122,14 +102,18 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 				return {
 					contents: 'export default null;',
 					loader: 'js',
-					resolveDir,
+					// resolveDir,
 				};
 			}
 
 			const artifact = new Artifact(
-				args.path.replace(buildOptions.source_path, '').slice(1),
+				args.path.replace(options.source_path, '').slice(1),
 			);
 			tempArtifacts.add(artifact);
+
+			// if (artifact.project_path.includes('worker')) {
+			// 	console.log('[esbuild]', '[onLoad]', artifact.project_path);
+			// }
 
 			await applyPlugins([artifact]);
 
@@ -151,6 +135,46 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 			};
 		});
 
+		// With "u" flag, we get "filter is not a valid Go regular expression" error
+		// eslint-disable-next-line require-unicode-regexp
+		build.onLoad({ filter: /.*/, namespace: 'worker' }, async (args) => {
+			const match = args.path.match(/^\$workers\/(?<name>[-a-z\d_]+)$/iu);
+			if (!match) {
+				// oxlint-disable-next-line no-console
+				console.error(`Invalid worker import: ${args.path}`);
+				process.exit(1);
+			}
+
+			const worker_name = match.groups!.name!;
+			const artifacts_worker = await createWorker(worker_name);
+			for (const artifact of artifacts_worker) {
+				tempArtifacts.add(artifact);
+			}
+
+			return {
+				contents: await artifacts_worker[0]!.text(),
+				loader: 'ts',
+				resolveDir: nodePath.join(options.source_path, '+workers', worker_name),
+			};
+		});
+
+		// With "u" flag, we get "filter is not a valid Go regular expression" error
+		// eslint-disable-next-line require-unicode-regexp
+		build.onLoad({ filter: /.*/, namespace: 'worker-src' }, (args) => {
+			const contents = worker_files.get(args.path);
+			if (contents === undefined) {
+				// oxlint-disable-next-line no-console
+				console.error(`Invalid worker-src import: ${args.path}`);
+				process.exit(1);
+			}
+
+			return {
+				contents,
+				loader: 'ts',
+				resolveDir: options.source_path,
+			};
+		});
+
 		build.onEnd(() => {
 			for (const artifact of tempArtifacts) {
 				if (!artifacts.collections.bundle.has(artifact)) {
@@ -168,25 +192,12 @@ export async function bundle(): Promise<void> {
 		paths.push(artifact.absolute_path);
 	}
 
-	const esbuild_options = {
-		absWorkingDir: buildOptions.source_path,
+	const result = await esbuild.build({
+		...esbuild_options,
 		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
-		entryPoints: [
-			nodePath.join(buildOptions.source_path, SENTINEL_PATH),
-			...paths,
-		],
-		outdir: '/',
-		//
-		bundle: true,
-		chunkNames: 'js/chunks/[hash]',
-		format: 'esm',
-		metafile: true,
-		minify: buildOptions.is_prod,
+		entryPoints: [nodePath.join(options.source_path, SENTINEL_PATH), ...paths],
 		splitting: true,
-		write: false,
-	} satisfies Kit10EsbuildOpions;
-
-	const result = await esbuild.build(esbuild_options);
+	});
 	if (result.errors.length > 0) {
 		// oxlint-disable-next-line no-console
 		console.error('esbuild errors:');
@@ -198,25 +209,28 @@ export async function bundle(): Promise<void> {
 		process.exit(1);
 	}
 
-	const metafile = processMetafile(esbuild_options, result.metafile);
+	const metafile = processMetafile(result.metafile);
 
 	for (const output of result.outputFiles) {
-		// console.log('esbuild result', output.path);
 		if (output.path.includes(SENTINEL_PATH)) {
 			continue;
 		}
 
 		const output_project_path = output.path.slice(1);
-		// console.log('output path', output.path);
 		const meta = metafile.get(output_project_path);
 		if (meta === undefined) {
 			throw new Error(`No metafile entry found for ${output_project_path}.`);
 		}
 
-		// const artifact_path = meta.project_path ?? output_project_path;
-		const artifact = new Artifact(meta.project_path ?? output_project_path);
-		if (artifact.project_path !== output_project_path) {
+		let artifact: Artifact;
+		if (
+			meta.project_path !== undefined
+			&& artifacts.exists(meta.project_path)
+		) {
+			artifact = new Artifact(meta.project_path);
 			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1)!);
+		} else {
+			artifact = new Artifact(output_project_path);
 		}
 
 		artifact.update(output.contents);
@@ -241,7 +255,6 @@ type BundleOutputMetadata = {
 
 /** Processes the esbuild metafile. */
 function processMetafile(
-	esbuild_options: Kit10EsbuildOpions,
 	metafile: Metafile,
 ): Map<string, BundleOutputMetadata> {
 	const result = new Map<string, BundleOutputMetadata>();
@@ -277,13 +290,13 @@ function processMetafile(
 
 			project_path = output.entryPoint.slice(output_entrypoint_prefix.length);
 
-			if (
-				nodePath.dirname(output_project_path) !== nodePath.dirname(project_path)
-			) {
-				throw new Error(
-					`Esbuild moved "${project_path}" to "${output_project_path}", which is in another directory. This should not happen.`,
-				);
-			}
+			// if (
+			// 	nodePath.dirname(output_project_path) !== nodePath.dirname(project_path)
+			// ) {
+			// 	throw new Error(
+			// 		`Esbuild moved "${project_path}" to "${output_project_path}", which is in another directory. This should not happen.`,
+			// 	);
+			// }
 		}
 
 		result.set(output_project_path, {

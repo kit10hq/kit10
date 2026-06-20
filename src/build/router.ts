@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import nodePath from 'node:path';
+import * as options from '../options.js';
 import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
 import * as buildOptions from './options.js';
@@ -12,15 +13,12 @@ export const app_routes: Map<string, Artifact> = new Map<string, Artifact>();
  * Returns a list of TempFile instances for the app entrypoints.
  */
 export function processEntrypoints(): void {
-	const routes_data = getRoutes(buildOptions.source_path);
+	const routes_data = getRoutes(options.source_path);
 	// console.log('routes_data', routes_data);
 
 	for (const route_data of routes_data) {
 		const artifact = new Artifact(
-			nodePath.relative(
-				buildOptions.source_path,
-				route_data.file.absolute_path,
-			),
+			nodePath.relative(options.source_path, route_data.file.absolute_path),
 		);
 
 		app_routes.set(route_data.route, artifact);
