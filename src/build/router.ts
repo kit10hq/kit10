@@ -39,7 +39,7 @@ export async function flushRouter(): Promise<void> {
 	await fs.cp(
 		nodePath.join(
 			import.meta.dirname,
-			'../template',
+			'../template/server',
 			buildOptions.server_runtime,
 		),
 		buildOptions.output_path,

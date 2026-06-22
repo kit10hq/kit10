@@ -1,27 +1,18 @@
-import { a as output_path, i as is_prod, n as source_path, o as output_static_path, r as config, s as server_runtime, t as project_path } from "./options-tBkoHjas.mjs";
+import { a as server_runtime, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-D2oYgwiy.mjs";
+import { n as source_path, t as project_path } from "./options-bbHkPexD.mjs";
+import { a as createLetterId, i as createId, n as workers_imports, o as escapeAttributeValue, t as workers_data } from "./workers-BbNt0iik.mjs";
 import { readdirSync } from "node:fs";
 import nodePath from "node:path";
 import * as fs$2 from "node:fs/promises";
 import fs$1 from "node:fs/promises";
 import { inspect, promisify } from "node:util";
-import { customAlphabet } from "nanoid";
 import zlib from "node:zlib";
 import { createPathsMatcher, getTsconfig } from "get-tsconfig";
 import * as esbuild from "esbuild";
-import { parseSync } from "oxc-parser";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
 import { minify } from "@minify-html/node";
-//#region src/utils.ts
-const createId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 16);
-customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 16);
-const createLetterId = customAlphabet("abcdefghijklmnopqrstuvwxyz", 16);
-/** Returns a safe value for an HTML attribute. */
-function escapeAttributeValue(value) {
-	return value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-//#endregion
 //#region src/build/fs/directory.ts
 const directories_created = /* @__PURE__ */ new Set();
 const directories_creating = /* @__PURE__ */ new Map();
@@ -274,7 +265,7 @@ var Artifact = class Artifact {
 		flushed_table.push({
 			filename: this.#project_path,
 			size: String(this.sizeUnsafe).padStart(7),
-			gzip_size: gzip_size === void 0 ? void 0 : String(gzip_size).padStart(9)
+			...gzip_size === void 0 ? {} : { gzip_size: String(gzip_size).padStart(9) }
 		});
 	}
 	toString() {
@@ -317,7 +308,7 @@ async function flush() {
 	const promises = [];
 	for (const artifact of collections.entrypoints.values()) promises.push(flushOne(artifact));
 	await Promise.all(promises);
-	console.table(flushed_table);
+	if (is_prod) console.table(flushed_table);
 }
 //#endregion
 //#region src/build/bundler/options.ts
@@ -362,67 +353,6 @@ async function getAbsolutePathOnResolve(args) {
 	} else absolute_path = args.resolveDir.length === 0 || args.path.startsWith("/") ? args.path : nodePath.join(args.resolveDir, args.path);
 	if (!absolute_path.startsWith(source_path)) return;
 	return absolute_path;
-}
-//#endregion
-//#region src/lib/workers.ts
-/** Imports that used by workers to call window code. */
-const workers_data = /* @__PURE__ */ new Map();
-/** Combined imports from all workers. */
-const workers_imports = /* @__PURE__ */ new Map();
-const WORKERS_DIR = nodePath.join(source_path, "+workers");
-const promises = [];
-for (const entry of await fs$1.readdir(WORKERS_DIR, { withFileTypes: true })) {
-	if (entry.isDirectory() !== true) throw new Error(`Expected directory at "+workers/${entry.name}".`);
-	promises.push(scanWorker(entry.name));
-}
-await Promise.all(promises);
-/** Scans worker files. */
-async function scanWorker(worker_name) {
-	const worker_dir = nodePath.join(WORKERS_DIR, worker_name);
-	const worker_entries = await fs$1.readdir(worker_dir, {
-		withFileTypes: true,
-		recursive: true
-	});
-	const worker_main_absolute_path = nodePath.join(worker_dir, "+worker.ts");
-	const worker_main_project_path = worker_main_absolute_path.slice(source_path.length + 1);
-	workers_data.set(worker_name, {
-		project_path: worker_main_project_path,
-		imports: /* @__PURE__ */ new Map(),
-		exports: /* @__PURE__ */ new Set()
-	});
-	const promises_worker = [];
-	for (const entry of worker_entries) {
-		if (entry.isFile() === false) continue;
-		const absolute_path = nodePath.join(entry.parentPath, entry.name);
-		promises_worker.push(parseWorkerFile(worker_name, absolute_path, worker_main_absolute_path === absolute_path));
-	}
-	await Promise.all(promises_worker);
-}
-/** Parses a worker file. */
-async function parseWorkerFile(worker_name, absolute_path, is_main) {
-	const worker_data = workers_data.get(worker_name);
-	const { module } = parseSync(absolute_path, await fs$1.readFile(absolute_path, "utf8"));
-	for (const import_ of module.staticImports) {
-		let path = import_.moduleRequest.value;
-		if (!path.startsWith("$src/")) continue;
-		path = path.slice(5);
-		for (const import_entry of import_.entries) {
-			if (import_entry.isType) continue;
-			const { name } = import_entry.importName;
-			if (name !== null) {
-				if (!worker_data.imports.has(path)) worker_data.imports.set(path, /* @__PURE__ */ new Set());
-				worker_data.imports.get(path).add(name);
-				if (!workers_imports.has(path)) workers_imports.set(path, /* @__PURE__ */ new Set());
-				workers_imports.get(path).add(name);
-			}
-		}
-	}
-	if (is_main) for (const export_ of module.staticExports) for (const export_entry of export_.entries) {
-		if (export_entry.isType) continue;
-		const { name } = export_entry.exportName;
-		if (name === null) continue;
-		worker_data.exports.add(name);
-	}
 }
 //#endregion
 //#region src/build/bundler/worker.ts
@@ -737,6 +667,13 @@ function processMetafile(metafile) {
 }
 //#endregion
 //#region src/build/formatter.ts
+const PATH = [
+	"/opt/homebrew/bin",
+	"/usr/local/bin",
+	"/usr/bin",
+	"/bin",
+	process.env.PATH ?? ""
+].join(":");
 /** Formats output files. Useful for development builds. */
 async function formatOutput() {
 	const biome_config_string = await fs$1.readFile(nodePath.join(import.meta.dirname, "../biome.json"), "utf8");
@@ -746,7 +683,13 @@ async function formatOutput() {
 	const config_path = nodePath.join(output_path, "biome.json");
 	await fs$1.writeFile(config_path, JSON.stringify(biome_config));
 	const { execSync } = await import("node:child_process");
-	execSync("biome format --write", { cwd: output_path });
+	execSync(`npx biome format --write`, {
+		cwd: output_path,
+		env: {
+			...process.env,
+			PATH
+		}
+	});
 	await fs$1.rm(config_path);
 }
 //#endregion
@@ -1235,7 +1178,7 @@ function processEntrypoints() {
 }
 /** Writes router files to the output directory. */
 async function flushRouter() {
-	await fs$1.cp(nodePath.join(import.meta.dirname, "../template", server_runtime), output_path, { recursive: true });
+	await fs$1.cp(nodePath.join(import.meta.dirname, "../template/server", server_runtime), output_path, { recursive: true });
 	const server_port = (is_prod ? config.server?.port : null) ?? 3e3;
 	if (server_runtime === "hono") {
 		const app_routes_js = [];

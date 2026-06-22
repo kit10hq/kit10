@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import nodePath from 'node:path';
 import { customAlphabet } from 'nanoid';
 
 export type Promisable<T> = T | Promise<T>;
@@ -22,4 +24,12 @@ export function escapeAttributeValue(value: string): string {
 		.replaceAll('"', '&quot;')
 		.replaceAll('<', '&lt;')
 		.replaceAll('>', '&gt;');
+}
+
+/** Removes all files and subdirectories from a directory, but not the directory itself. */
+export async function clearDir(dir: string): Promise<void> {
+	const files = await fs.readdir(dir);
+	await Promise.all(
+		files.map((file) => fs.rm(nodePath.join(dir, file), { recursive: true })),
+	);
 }

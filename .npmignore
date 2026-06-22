@@ -44,3 +44,6 @@ yarn.lock
 # ignore packages
 *.tar.gz
 *.tgz
+
+# DO NOT ignore template files
+!template/**

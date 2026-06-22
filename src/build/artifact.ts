@@ -307,8 +307,9 @@ export class Artifact {
 		flushed_table.push({
 			filename: this.#project_path,
 			size: String(this.sizeUnsafe).padStart(7),
-			gzip_size:
-				gzip_size === undefined ? undefined : String(gzip_size).padStart(9),
+			...(gzip_size === undefined
+				? {}
+				: { gzip_size: String(gzip_size).padStart(9) }),
 		});
 	}
 
@@ -372,6 +373,8 @@ export async function flush(): Promise<void> {
 
 	await Promise.all(promises);
 
-	// oxlint-disable-next-line no-console
-	console.table(flushed_table);
+	if (buildOptions.is_prod) {
+		// oxlint-disable-next-line no-console
+		console.table(flushed_table);
+	}
 }

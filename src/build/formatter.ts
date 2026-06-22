@@ -2,6 +2,14 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import * as buildOptions from './options.js';
 
+const PATH = [
+	'/opt/homebrew/bin', // macOS Apple Silicon, common
+	'/usr/local/bin', // macOS Intel / Linux, common
+	'/usr/bin',
+	'/bin',
+	process.env.PATH ?? '',
+].join(':');
+
 /** Formats output files. Useful for development builds. */
 export async function formatOutput() {
 	const biome_config_string = await fs.readFile(
@@ -17,8 +25,13 @@ export async function formatOutput() {
 	await fs.writeFile(config_path, JSON.stringify(biome_config));
 
 	const { execSync } = await import('node:child_process');
-	execSync('biome format --write', {
+
+	execSync(`npx biome format --write`, {
 		cwd: buildOptions.output_path,
+		env: {
+			...process.env,
+			PATH,
+		},
 		// stdio: 'inherit',
 	});
 

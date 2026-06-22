@@ -6,8 +6,4 @@ const server_runtime = (is_prod ? config.server?.runtime : null) ?? "hono";
 const output_path = nodePath.join(process.cwd(), "dist");
 const output_static_path = nodePath.join(output_path, "static");
 //#endregion
-//#region src/options.ts
-const project_path = nodePath.resolve(process.cwd());
-const source_path = nodePath.join(process.cwd(), "src");
-//#endregion
-export { output_path as a, is_prod as i, source_path as n, output_static_path as o, config as r, server_runtime as s, project_path as t };
+export { server_runtime as a, output_static_path as i, is_prod as n, output_path as r, config as t };
