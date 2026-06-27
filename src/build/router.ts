@@ -64,7 +64,7 @@ export async function flushRouter(): Promise<void> {
 		let contents = await fs.readFile(PATH_MAIN, 'utf8');
 		contents = contents
 			.replaceAll(
-				/\.\.\/\.\.\/src\/reexports\/(?<name>[a-z]+)\.js/gu,
+				/[/.]+\/src\/reexports\/(?<name>[a-z]+)\.js/gu,
 				'kit10/$<name>',
 			)
 			.replace(

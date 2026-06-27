@@ -1,7 +1,7 @@
 import { inspect } from "node:util";
 
 //#region src/build/artifact.d.ts
-type ArtifactContent = ConstructorParameters<typeof Blob>[0][number];
+type ArtifactContent = Exclude<ConstructorParameters<typeof Blob>[0], undefined>[number];
 declare class Artifact {
   #private;
   readonly id: string;

@@ -1,5 +1,5 @@
-//#region browser/workers/worker/client.d.ts
-declare class Kit10WorkerClient {
+//#region browser/workers/service-worker/client.d.ts
+declare class Kit10ServiceWorkerClient {
   #private;
   readonly name: string;
   readonly id: string;
@@ -8,4 +8,4 @@ declare class Kit10WorkerClient {
   send(method: string, args: unknown[]): Promise<unknown>;
 }
 //#endregion
-export { Kit10WorkerClient };
+export { Kit10ServiceWorkerClient };

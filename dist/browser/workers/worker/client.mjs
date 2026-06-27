@@ -3,6 +3,7 @@ import { n as eventTarget, r as parseWorkerMessage, t as createId } from "../../
 const SYMBOL_WORKER_TERMINATED = Symbol("worker-terminated");
 var Kit10WorkerClient = class {
 	name;
+	id = createId();
 	#url;
 	#fallbackGetter;
 	#start_promise;

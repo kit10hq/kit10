@@ -12,7 +12,7 @@
 		"module": "preserve",
 		"noEmit": true,
 		"lib": ["es2024"],
-		"types": ["*"],
+		"types": ["node"],
 		"declaration": true,
 		"isolatedDeclarations": false
 	},

@@ -4,7 +4,7 @@ import { createId } from '../utils.js';
 const SYMBOL_WORKER_TERMINATED = Symbol('worker-terminated');
 
 export class Kit10WorkerClient {
-	// readonly name: string;
+	readonly id = createId();
 	#url: string;
 	#fallbackGetter: () => Promise<unknown>;
 	#start_promise: Promise<void> | undefined;

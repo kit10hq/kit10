@@ -138,7 +138,7 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 		// With "u" flag, we get "filter is not a valid Go regular expression" error
 		// eslint-disable-next-line require-unicode-regexp
 		build.onLoad({ filter: /.*/, namespace: 'worker' }, async (args) => {
-			const match = args.path.match(/^\$workers\/(?<name>[-a-z\d_]+)$/iu);
+			const match = args.path.match(/^\$workers\/(?<name>\+?[-a-z\d_]+)$/iu);
 			if (!match) {
 				// oxlint-disable-next-line no-console
 				console.error(`Invalid worker import: ${args.path}`);

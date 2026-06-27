@@ -15,10 +15,29 @@ import {
 
 export const worker_files = new Map<string, string>();
 
+// eslint-disable-next-line jsdoc/require-jsdoc
+function getWorkerCodeParts(worker_name: string) {
+	if (worker_name === '+service') {
+		return {
+			class: 'ServiceWorker',
+			import: 'service-worker',
+			request_fn: 'broadcastToWindows',
+		};
+	}
+
+	return {
+		class: 'Worker',
+		import: 'worker',
+		request_fn: 'sendReqeustToWindow',
+	};
+}
+
 /** Builds worker. */
 export async function createWorker(worker_name: string) {
 	const worker_client_path = `+workers/${worker_name}/+worker.client.js`;
 	const worker_window_path = `+workers/${worker_name}/+worker.window.js`;
+
+	const code_parts = getWorkerCodeParts(worker_name);
 
 	// console.log(`[createWorker] creating ${name}`);
 
@@ -45,16 +64,20 @@ export async function createWorker(worker_name: string) {
 			`import { ${in_window_imports.join(', ')} } from '../../${path}';`,
 		);
 
-		buildDollarSrcModule(path);
+		buildDollarSrcModule(worker_name, path);
 	}
 
 	in_window_worker_client_lines.push(
 		// add import for kit10 worker communication event target
-		`import { Kit10WorkerClient } from 'kit10/worker/client';`,
+		`import { Kit10${code_parts.class}Client } from 'kit10/${code_parts.import}/client';`,
 		// create event target
-		`const kit10WorkerClient = new Kit10WorkerClient(`,
+		`const kit10${code_parts.class}Client = new Kit10${code_parts.class}Client(`,
 		`\t${JSON.stringify(worker_name)},`,
-		`\t${JSON.stringify(`/+workers/${worker_name}/+worker.worker.js`)},`,
+		`\t${JSON.stringify(
+			worker_name === '+service'
+				? '/+service-worker.js'
+				: `/+workers/${worker_name}/+worker.worker.js`,
+		)},`,
 		`\t() => import(${JSON.stringify(`./+worker.window.js`)}),`,
 		`\t{`,
 		...in_window_handler_parts,
@@ -66,7 +89,7 @@ export async function createWorker(worker_name: string) {
 	for (const specifier of worker_data.exports) {
 		in_window_worker_client_lines.push(
 			`export function ${specifier}(...args) {`,
-			`\treturn kit10WorkerClient.send(${JSON.stringify(specifier)}, args);`,
+			`\treturn kit10${code_parts.class}Client.send(${JSON.stringify(specifier)}, args);`,
 			`}`,
 		);
 	}
@@ -89,7 +112,7 @@ export async function createWorker(worker_name: string) {
 }
 
 /** Build a file that worker will use to send requests to the window. */
-function buildDollarSrcModule(path: string) {
+function buildDollarSrcModule(worker_name: string, path: string) {
 	const src_path = `$src/${path}`;
 	if (worker_files.has(src_path)) {
 		return;
@@ -100,13 +123,15 @@ function buildDollarSrcModule(path: string) {
 		throw new Error(`No imports found for module "${src_path}".`);
 	}
 
+	const code_parts = getWorkerCodeParts(worker_name);
+
 	const lines: string[] = [
-		`import { sendReqeustToWindow } from "kit10/worker/server"`,
+		`import { ${code_parts.request_fn} } from "kit10/${code_parts.import}/server"`,
 	];
 	for (const specifier of specifiers) {
 		lines.push(
 			`export function ${specifier}(...args) {`,
-			`\treturn sendReqeustToWindow(${JSON.stringify(`${path}:${specifier}`)}, args);`,
+			`\treturn ${code_parts.request_fn}(${JSON.stringify(`${path}:${specifier}`)}, args);`,
 			`}`,
 		);
 	}
@@ -116,10 +141,12 @@ function buildDollarSrcModule(path: string) {
 
 /** Creates entrypoint file for worker, which will be used as "+worker.window.js". */
 function createWorkerEntrypointFiles(worker_name: string) {
+	const code_parts = getWorkerCodeParts(worker_name);
+
 	const lines: string[] = [
 		`import * as handlers from "./+worker.js";`,
-		`import { Kit10WorkerServer } from "kit10/worker/server";`,
-		`const kit10WorkerServer = new Kit10WorkerServer(${JSON.stringify(worker_name)}, handlers);`,
+		`import { Kit10${code_parts.class}Server } from "kit10/${code_parts.import}/server";`,
+		`const kit10${code_parts.class}Server = new Kit10${code_parts.class}Server(${JSON.stringify(worker_name)}, handlers);`,
 	];
 
 	// const _artifact = new Artifact(
@@ -134,7 +161,7 @@ function createWorkerEntrypointFiles(worker_name: string) {
 	// for +worker.worker.js, i.e. the code that runs actually in the worker
 	// we should bind worker server to worker addEventListener/postMessage
 
-	lines.push(`kit10WorkerServer.bindWorker();`);
+	lines.push(`kit10${code_parts.class}Server.bindWorker();`);
 
 	worker_files.set(
 		`+workers/${worker_name}/+worker.worker.js`,
@@ -177,7 +204,7 @@ const esbuildKit10WorkerPlugin: esbuild.Plugin = {
 
 			let resolve_dir = options.source_path;
 			if (args.path.endsWith('/+worker.worker.js')) {
-				const match = args.path.match(/^\+workers\/(?<name>[-a-z\d_]+)\//iu);
+				const match = args.path.match(/^\+workers\/(?<name>\+?[-a-z\d_]+)\//iu);
 				if (!match) {
 					// oxlint-disable-next-line no-console
 					console.error(`Invalid worker entrypoint file: ${args.path}`);

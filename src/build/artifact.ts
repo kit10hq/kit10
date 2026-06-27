@@ -8,7 +8,10 @@ import { EXT_COMPRESS, gzip } from './fs/gzip.js';
 import * as buildOptions from './options.js';
 import { resolveProjectPath } from './utils.js';
 
-export type ArtifactContent = ConstructorParameters<typeof Blob>[0][number];
+export type ArtifactContent = Exclude<
+	ConstructorParameters<typeof Blob>[0],
+	undefined
+>[number];
 
 const all: Map<string, Artifact> = new Map<string, Artifact>();
 export const collections = {

@@ -23,6 +23,7 @@
         "@biomejs/biome": "2.4.10",
         "@kirick/lint": "0.3.2",
         "@types/node": "22.15.13",
+        "@types/serviceworker": "0.0.197",
         "@types/ws": "8.18.1",
         "eslint": "10.2.0",
         "oxlint": "1.58.0",
@@ -308,6 +309,8 @@
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
 
     "@types/node": ["@types/node@22.15.13", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-mkmz+UBGCF/ssSObTp1McwQEvIjO2hUnVvZzck61l0su7btUill8OSvzA4N62+AtkJgMhiniyD+wEL5kocZaEA=="],
+
+    "@types/serviceworker": ["@types/serviceworker@0.0.197", "", {}, "sha512-PaeOFYHcR2c7guBn9M4Y5H1++snluHYzZ6DzzRCUf6kue2FFfpTjF82aZq31DJ2c/Qyb3KGf5ROQH/fOU8NdxQ=="],
 
     "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 

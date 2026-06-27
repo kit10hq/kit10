@@ -14,6 +14,8 @@
 		},
 		"./worker/client": "./dist/browser/workers/worker/client.mjs",
 		"./worker/server": "./dist/browser/workers/worker/server.mjs",
+		"./service-worker/client": "./dist/browser/workers/service-worker/client.mjs",
+		"./service-worker/server": "./dist/browser/workers/service-worker/server.mjs",
 		"./hono": "./dist/src/reexports/hono.mjs",
 		"./ws": "./dist/src/reexports/ws.mjs"
 	},
@@ -39,6 +41,7 @@
 		"@biomejs/biome": "2.4.10",
 		"@kirick/lint": "0.3.2",
 		"@types/node": "22.15.13",
+		"@types/serviceworker": "0.0.197",
 		"@types/ws": "8.18.1",
 		"eslint": "10.2.0",
 		"oxlint": "1.58.0",
@@ -49,7 +52,7 @@
 		"unplugin-unused": "0.5.7"
 	},
 	"scripts": {
-		"build": "tsdown browser/workers/worker/client.ts browser/workers/worker/server.ts src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
+		"build": "tsdown browser/workers/worker/client.ts browser/workers/worker/server.ts browser/workers/service-worker/client.ts browser/workers/service-worker/server.ts src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
 		"check": "bun run lint && bun run build",
 		"lint": "biome format && oxlint && eslint . && tsc",
 		"pack": "bun run check && dev pack create"

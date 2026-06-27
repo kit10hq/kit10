@@ -357,10 +357,23 @@ async function getAbsolutePathOnResolve(args) {
 //#endregion
 //#region src/build/bundler/worker.ts
 const worker_files = /* @__PURE__ */ new Map();
+function getWorkerCodeParts(worker_name) {
+	if (worker_name === "+service") return {
+		class: "ServiceWorker",
+		import: "service-worker",
+		request_fn: "broadcastToWindows"
+	};
+	return {
+		class: "Worker",
+		import: "worker",
+		request_fn: "sendReqeustToWindow"
+	};
+}
 /** Builds worker. */
 async function createWorker(worker_name) {
 	const worker_client_path = `+workers/${worker_name}/+worker.client.js`;
 	const worker_window_path = `+workers/${worker_name}/+worker.window.js`;
+	const code_parts = getWorkerCodeParts(worker_name);
 	const worker_data = workers_data.get(worker_name);
 	const in_window_worker_client_lines = [];
 	const in_window_handler_parts = [];
@@ -373,34 +386,36 @@ async function createWorker(worker_name) {
 			in_window_handler_parts.push(`\t\t${JSON.stringify(`${path}:${specifier}`)}: ${specifier_imported},`);
 		}
 		in_window_worker_client_lines.push(`import { ${in_window_imports.join(", ")} } from '../../${path}';`);
-		buildDollarSrcModule(path);
+		buildDollarSrcModule(worker_name, path);
 	}
-	in_window_worker_client_lines.push(`import { Kit10WorkerClient } from 'kit10/worker/client';`, `const kit10WorkerClient = new Kit10WorkerClient(`, `\t${JSON.stringify(worker_name)},`, `\t${JSON.stringify(`/+workers/${worker_name}/+worker.worker.js`)},`, `\t() => import(${JSON.stringify(`./+worker.window.js`)}),`, `\t{`, ...in_window_handler_parts, `\t},`, `);`);
-	for (const specifier of worker_data.exports) in_window_worker_client_lines.push(`export function ${specifier}(...args) {`, `\treturn kit10WorkerClient.send(${JSON.stringify(specifier)}, args);`, `}`);
+	in_window_worker_client_lines.push(`import { Kit10${code_parts.class}Client } from 'kit10/${code_parts.import}/client';`, `const kit10${code_parts.class}Client = new Kit10${code_parts.class}Client(`, `\t${JSON.stringify(worker_name)},`, `\t${JSON.stringify(worker_name === "+service" ? "/+service-worker.js" : `/+workers/${worker_name}/+worker.worker.js`)},`, `\t() => import(${JSON.stringify(`./+worker.window.js`)}),`, `\t{`, ...in_window_handler_parts, `\t},`, `);`);
+	for (const specifier of worker_data.exports) in_window_worker_client_lines.push(`export function ${specifier}(...args) {`, `\treturn kit10${code_parts.class}Client.send(${JSON.stringify(specifier)}, args);`, `}`);
 	createWorkerEntrypointFiles(worker_name);
 	worker_files.set(worker_client_path, in_window_worker_client_lines.join("\n"));
 	await bundleWorker(worker_name);
 	return [new Artifact(worker_client_path, worker_files.get(worker_client_path)), new Artifact(worker_window_path, worker_files.get(worker_window_path))];
 }
 /** Build a file that worker will use to send requests to the window. */
-function buildDollarSrcModule(path) {
+function buildDollarSrcModule(worker_name, path) {
 	const src_path = `$src/${path}`;
 	if (worker_files.has(src_path)) return;
 	const specifiers = workers_imports.get(path);
 	if (!specifiers) throw new Error(`No imports found for module "${src_path}".`);
-	const lines = [`import { sendReqeustToWindow } from "kit10/worker/server"`];
-	for (const specifier of specifiers) lines.push(`export function ${specifier}(...args) {`, `\treturn sendReqeustToWindow(${JSON.stringify(`${path}:${specifier}`)}, args);`, `}`);
+	const code_parts = getWorkerCodeParts(worker_name);
+	const lines = [`import { ${code_parts.request_fn} } from "kit10/${code_parts.import}/server"`];
+	for (const specifier of specifiers) lines.push(`export function ${specifier}(...args) {`, `\treturn ${code_parts.request_fn}(${JSON.stringify(`${path}:${specifier}`)}, args);`, `}`);
 	worker_files.set(src_path, lines.join("\n"));
 }
 /** Creates entrypoint file for worker, which will be used as "+worker.window.js". */
 function createWorkerEntrypointFiles(worker_name) {
+	const code_parts = getWorkerCodeParts(worker_name);
 	const lines = [
 		`import * as handlers from "./+worker.js";`,
-		`import { Kit10WorkerServer } from "kit10/worker/server";`,
-		`const kit10WorkerServer = new Kit10WorkerServer(${JSON.stringify(worker_name)}, handlers);`
+		`import { Kit10${code_parts.class}Server } from "kit10/${code_parts.import}/server";`,
+		`const kit10${code_parts.class}Server = new Kit10${code_parts.class}Server(${JSON.stringify(worker_name)}, handlers);`
 	];
 	worker_files.set(`+workers/${worker_name}/+worker.window.js`, lines.join("\n"));
-	lines.push(`kit10WorkerServer.bindWorker();`);
+	lines.push(`kit10${code_parts.class}Server.bindWorker();`);
 	worker_files.set(`+workers/${worker_name}/+worker.worker.js`, lines.join("\n"));
 }
 const esbuildKit10WorkerPlugin = {
@@ -426,7 +441,7 @@ const esbuildKit10WorkerPlugin = {
 			}
 			let resolve_dir = source_path;
 			if (args.path.endsWith("/+worker.worker.js")) {
-				const match = args.path.match(/^\+workers\/(?<name>[-a-z\d_]+)\//iu);
+				const match = args.path.match(/^\+workers\/(?<name>\+?[-a-z\d_]+)\//iu);
 				if (!match) {
 					console.error(`Invalid worker entrypoint file: ${args.path}`);
 					process.exit(1);
@@ -570,7 +585,7 @@ const esbuildKit10Plugin = {
 			filter: /.*/,
 			namespace: "worker"
 		}, async (args) => {
-			const match = args.path.match(/^\$workers\/(?<name>[-a-z\d_]+)$/iu);
+			const match = args.path.match(/^\$workers\/(?<name>\+?[-a-z\d_]+)$/iu);
 			if (!match) {
 				console.error(`Invalid worker import: ${args.path}`);
 				process.exit(1);
@@ -1185,7 +1200,7 @@ async function flushRouter() {
 		for (const [route, artifact] of app_routes.entries()) app_routes_js.push(`app.get('${route}', serveFile('/${artifact.project_path}'));`);
 		const PATH_MAIN = nodePath.join(output_path, "main.js");
 		let contents = await fs$1.readFile(PATH_MAIN, "utf8");
-		contents = contents.replaceAll(/\.\.\/\.\.\/src\/reexports\/(?<name>[a-z]+)\.js/gu, "kit10/$<name>").replace("const LINK_HEADERS = {};", `const LINK_HEADERS = ${JSON.stringify(link_headers)};`).replace("// MARK: app", app_routes_js.join("\n")).replace("port: 0,", `port: ${server_port},`);
+		contents = contents.replaceAll(/[/.]+\/src\/reexports\/(?<name>[a-z]+)\.js/gu, "kit10/$<name>").replace("const LINK_HEADERS = {};", `const LINK_HEADERS = ${JSON.stringify(link_headers)};`).replace("// MARK: app", app_routes_js.join("\n")).replace("port: 0,", `port: ${server_port},`);
 		if (is_prod) while (true) {
 			const index_ws_start = contents.indexOf("// MARK: devserver\n");
 			if (index_ws_start === -1) break;

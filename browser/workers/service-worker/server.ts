@@ -1,7 +1,13 @@
+/// <reference types="@types/serviceworker" />
+
 import { eventTarget, parseWorkerMessage } from '../events.js';
 import { createId } from '../utils.js';
 
-export class Kit10WorkerServer {
+const { promise: readyPromise, resolve: onServiceWorkerReady } =
+	// oxlint-disable-next-line typescript/no-invalid-void-type
+	Promise.withResolvers<void>();
+
+export class Kit10ServiceWorkerServer {
 	readonly id = createId();
 
 	constructor(
@@ -20,26 +26,43 @@ export class Kit10WorkerServer {
 			}
 		});
 
-		console.log(`[WORKER ${this.id}] started.`);
+		console.log(`[SERVICE WORKER ${this.id}] started.`);
 	}
 
 	/** Bind worker addEventListener/postMessage to the event target. */
 	bindWorker() {
+		globalThis.addEventListener('install', (/* event: ExtendableEvent */) => {
+			console.log(`[SERVICE WORKER ${this.id}] installing...`);
+
+			globalThis.skipWaiting();
+		});
+
+		globalThis.addEventListener('activate', (event: ExtendableEvent) => {
+			console.log(`[SERVICE WORKER ${this.id}] activated.`);
+
+			event.waitUntil(
+				(async () => {
+					await globalThis.clients.claim();
+
+					onServiceWorkerReady();
+					// oxlint-disable-next-line no-console
+				})().catch(console.error),
+			);
+		});
+
 		// message sent from the worker to the window
 		eventTarget.on(`->+window`, (event) => {
-			globalThis.postMessage({
+			this.#broadcast({
 				type: event.type,
 				detail: event.detail,
-				// oxlint-disable-next-line unicorn/require-post-message-target-origin
 			});
 		});
 
 		// worker responds to window request
 		eventTarget.on(`${this.name}->`, (event) => {
-			globalThis.postMessage({
+			this.#broadcast({
 				type: event.type,
 				detail: event.detail,
-				// oxlint-disable-next-line unicorn/require-post-message-target-origin
 			});
 		});
 
@@ -57,46 +80,37 @@ export class Kit10WorkerServer {
 		this.#pingPage();
 	}
 
-	#pingPage() {
-		globalThis.postMessage(
-			// oxlint-disable-next-line unicorn/require-post-message-target-origin
-			{ type: 'ping' },
-		);
+	async #pingPage() {
+		await this.#broadcast({ type: 'ping' });
 
 		setTimeout(() => this.#pingPage(), 1000);
 	}
+
+	async #broadcast(message: unknown) {
+		const window_clients = await globalThis.clients.matchAll();
+		for (const window_client of window_clients) {
+			window_client.postMessage(
+				// oxlint-disable-next-line unicorn/require-post-message-target-origin
+				structuredClone(message),
+			);
+		}
+	}
 }
 
-// we do not include listener on "+window->" in every Kit10WorkerServer as event the same on the same event target
-// we can create a single listener for all workers to reuse by all workers running in the window.
-// if code is running in a worker, this will not make difference.
-const response_resolvers = new Map<string, (value: unknown) => void>();
+// In service workers, window can not "respond" to messages because service worker broadcasts a message to all windows.
 
-eventTarget.on('+window->', (event) => {
-	const { id, value } = event.detail;
-	const resolve = response_resolvers.get(id);
-	if (resolve) {
-		resolve(value);
-		response_resolvers.delete(id);
-	}
-});
-
-const tickPromise = new Promise<void>((resolve) => {
-	setTimeout(resolve, 0);
-});
-
-/** Send a request to the window. */
-export async function sendReqeustToWindow(
+/** Broadcast a message to all windows. As it is a broadcast, response is not expected. */
+export async function broadcastToWindows(
 	method: string,
 	args: unknown[],
-): Promise<unknown> {
+): Promise<void> {
 	// in workers, we import files first and only then run .bindWorker()
 	// and request can be sent as side-effect in imported modules,
 	// therefore, it will be lost.
 	// so, we need to wait for the next tick before sending the request,
 	// waiting for worker code to be loaded and executed at top level.
 	if (globalThis.constructor.name !== 'Window') {
-		await tickPromise;
+		await readyPromise;
 	}
 
 	const id = createId();
@@ -105,8 +119,4 @@ export async function sendReqeustToWindow(
 		method,
 		args,
 	});
-
-	const { promise, resolve } = Promise.withResolvers<unknown>();
-	response_resolvers.set(id, resolve);
-	return promise;
 }

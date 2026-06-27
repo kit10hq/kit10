@@ -1,6 +1,7 @@
 import { n as eventTarget, r as parseWorkerMessage, t as createId } from "../../../utils-BNcSbbpj.mjs";
-//#region browser/workers/worker/server.ts
-var Kit10WorkerServer = class {
+//#region browser/workers/service-worker/server.ts
+const { promise: readyPromise, resolve: onServiceWorkerReady } = Promise.withResolvers();
+var Kit10ServiceWorkerServer = class {
 	name;
 	id = createId();
 	constructor(name, handlers) {
@@ -16,18 +17,29 @@ var Kit10WorkerServer = class {
 				});
 			}
 		});
-		console.log(`[WORKER ${this.id}] started.`);
+		console.log(`[SERVICE WORKER ${this.id}] started.`);
 	}
 	/** Bind worker addEventListener/postMessage to the event target. */
 	bindWorker() {
+		globalThis.addEventListener("install", () => {
+			console.log(`[SERVICE WORKER ${this.id}] installing...`);
+			globalThis.skipWaiting();
+		});
+		globalThis.addEventListener("activate", (event) => {
+			console.log(`[SERVICE WORKER ${this.id}] activated.`);
+			event.waitUntil((async () => {
+				await globalThis.clients.claim();
+				onServiceWorkerReady();
+			})().catch(console.error));
+		});
 		eventTarget.on(`->+window`, (event) => {
-			globalThis.postMessage({
+			this.#broadcast({
 				type: event.type,
 				detail: event.detail
 			});
 		});
 		eventTarget.on(`${this.name}->`, (event) => {
-			globalThis.postMessage({
+			this.#broadcast({
 				type: event.type,
 				detail: event.detail
 			});
@@ -38,35 +50,24 @@ var Kit10WorkerServer = class {
 		});
 		this.#pingPage();
 	}
-	#pingPage() {
-		globalThis.postMessage({ type: "ping" });
+	async #pingPage() {
+		await this.#broadcast({ type: "ping" });
 		setTimeout(() => this.#pingPage(), 1e3);
 	}
-};
-const response_resolvers = /* @__PURE__ */ new Map();
-eventTarget.on("+window->", (event) => {
-	const { id, value } = event.detail;
-	const resolve = response_resolvers.get(id);
-	if (resolve) {
-		resolve(value);
-		response_resolvers.delete(id);
+	async #broadcast(message) {
+		const window_clients = await globalThis.clients.matchAll();
+		for (const window_client of window_clients) window_client.postMessage(structuredClone(message));
 	}
-});
-const tickPromise = new Promise((resolve) => {
-	setTimeout(resolve, 0);
-});
-/** Send a request to the window. */
-async function sendReqeustToWindow(method, args) {
-	if (globalThis.constructor.name !== "Window") await tickPromise;
+};
+/** Broadcast a message to all windows. As it is a broadcast, response is not expected. */
+async function broadcastToWindows(method, args) {
+	if (globalThis.constructor.name !== "Window") await readyPromise;
 	const id = createId();
 	eventTarget.emit("->+window", {
 		id,
 		method,
 		args
 	});
-	const { promise, resolve } = Promise.withResolvers();
-	response_resolvers.set(id, resolve);
-	return promise;
 }
 //#endregion
-export { Kit10WorkerServer, sendReqeustToWindow };
+export { Kit10ServiceWorkerServer, broadcastToWindows };

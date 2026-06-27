@@ -1,7 +1,7 @@
 // @ts-check
 /* eslint-disable jsdoc/no-types, n/no-unpublished-import */
 
-/** @import { Handler } from '../../src/reexports/hono.js'; */
+/** @import { Handler } from '../../../src/reexports/hono.js'; */
 
 import nodePath from 'node:path';
 import {
@@ -11,9 +11,9 @@ import {
 	// MARK: devserver
 	upgradeWebSocket,
 	// MARK: devserver end
-} from '../../src/reexports/hono.js';
+} from '../../../src/reexports/hono.js';
 // MARK: devserver
-import { WebSocketServer } from '../../src/reexports/ws.js';
+import { WebSocketServer } from '../../../src/reexports/ws.js';
 
 // MARK: devserver end
 
@@ -50,6 +50,10 @@ function serveFile(path) {
 const app = new Hono();
 app.get('*', staticServer);
 // MARK: app
+app.get(
+	'/+service-worker.js',
+	serveFile('+workers/+service/+worker.worker.js'),
+);
 
 // MARK: devserver
 app.get(
