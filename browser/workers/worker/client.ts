@@ -15,7 +15,7 @@ export class Kit10WorkerClient {
 		readonly name: string,
 		url: string,
 		fallbackGetter: () => Promise<unknown>,
-		handlers: Record<string, (...args: unknown[]) => unknown>,
+		handlers: Record<string, (...args: unknown[]) => unknown>, // WorkerClientHandlers,
 	) {
 		this.#url = url;
 		this.#fallbackGetter = fallbackGetter;
@@ -25,10 +25,18 @@ export class Kit10WorkerClient {
 			const handler = handlers[method];
 			if (handler) {
 				const result = await handler(...args);
-				eventTarget.emit('+window->', {
-					id,
-					value: result,
-				});
+				eventTarget.emit('+window->', { id, value: result });
+
+				// for dynamically imported handlers
+				// const module_ = await handler[0]();
+				// const fn = module_[handler[1]];
+				// if (isFunction(fn)) {
+				// 	const result = await fn(...args);
+				// 	eventTarget.emit('+window->', {
+				// 		id,
+				// 		value: result,
+				// 	});
+				// }
 			}
 		});
 

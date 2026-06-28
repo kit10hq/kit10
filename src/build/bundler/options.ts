@@ -18,7 +18,7 @@ export const esbuild_options = {
 } satisfies BuildOptions;
 
 /** Checks if the given path exists and returns the corresponding TypeScript path if it does. */
-async function jsTsResolver(path: string): Promise<string | undefined> {
+export async function jsTsResolver(path: string): Promise<string | undefined> {
 	const path_ts = path.replace(/\.js$/u, '.ts');
 
 	try {

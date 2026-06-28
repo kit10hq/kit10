@@ -9,8 +9,8 @@ import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
 import {
 	esbuild_options,
-	esbuildTsJsResolverPlugin,
 	getAbsolutePathOnResolve,
+	jsTsResolver,
 } from './bundler/options.js';
 import { createWorker, worker_files } from './bundler/worker.js';
 import { applyPlugins } from './plugins.js';
@@ -85,8 +85,9 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 				return;
 			}
 
+			const absolute_path_ts = await jsTsResolver(absolute_path);
 			return {
-				path: absolute_path,
+				path: absolute_path_ts ?? absolute_path,
 				namespace: 'artifact',
 			};
 		});
@@ -194,7 +195,7 @@ export async function bundle(): Promise<void> {
 
 	const result = await esbuild.build({
 		...esbuild_options,
-		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
+		plugins: [esbuildKit10Plugin],
 		entryPoints: [nodePath.join(options.source_path, SENTINEL_PATH), ...paths],
 		splitting: true,
 	});

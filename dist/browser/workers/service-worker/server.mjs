@@ -17,16 +17,13 @@ var Kit10ServiceWorkerServer = class {
 				});
 			}
 		});
-		console.log(`[SERVICE WORKER ${this.id}] started.`);
 	}
 	/** Bind worker addEventListener/postMessage to the event target. */
 	bindWorker() {
 		globalThis.addEventListener("install", () => {
-			console.log(`[SERVICE WORKER ${this.id}] installing...`);
 			globalThis.skipWaiting();
 		});
 		globalThis.addEventListener("activate", (event) => {
-			console.log(`[SERVICE WORKER ${this.id}] activated.`);
 			event.waitUntil((async () => {
 				await globalThis.clients.claim();
 				onServiceWorkerReady();

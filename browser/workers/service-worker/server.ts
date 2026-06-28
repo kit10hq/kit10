@@ -26,19 +26,19 @@ export class Kit10ServiceWorkerServer {
 			}
 		});
 
-		console.log(`[SERVICE WORKER ${this.id}] started.`);
+		// console.log(`[SERVICE WORKER ${this.id}] started.`);
 	}
 
 	/** Bind worker addEventListener/postMessage to the event target. */
 	bindWorker() {
 		globalThis.addEventListener('install', (/* event: ExtendableEvent */) => {
-			console.log(`[SERVICE WORKER ${this.id}] installing...`);
+			// console.log(`[SERVICE WORKER ${this.id}] installing...`);
 
 			globalThis.skipWaiting();
 		});
 
 		globalThis.addEventListener('activate', (event: ExtendableEvent) => {
-			console.log(`[SERVICE WORKER ${this.id}] activated.`);
+			// console.log(`[SERVICE WORKER ${this.id}] activated.`);
 
 			event.waitUntil(
 				(async () => {
@@ -86,6 +86,7 @@ export class Kit10ServiceWorkerServer {
 		setTimeout(() => this.#pingPage(), 1000);
 	}
 
+	// oxlint-disable-next-line class-methods-use-this
 	async #broadcast(message: unknown) {
 		const window_clients = await globalThis.clients.matchAll();
 		for (const window_client of window_clients) {

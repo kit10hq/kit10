@@ -553,7 +553,7 @@ const esbuildKit10Plugin = {
 			const absolute_path = await getAbsolutePathOnResolve(args);
 			if (absolute_path === void 0) return;
 			return {
-				path: absolute_path,
+				path: await jsTsResolver(absolute_path) ?? absolute_path,
 				namespace: "artifact"
 			};
 		});
@@ -625,7 +625,7 @@ async function bundle() {
 	for (const artifact of collections.bundle) paths.push(artifact.absolute_path);
 	const result = await esbuild.build({
 		...esbuild_options,
-		plugins: [esbuildTsJsResolverPlugin, esbuildKit10Plugin],
+		plugins: [esbuildKit10Plugin],
 		entryPoints: [nodePath.join(source_path, SENTINEL_PATH), ...paths],
 		splitting: true
 	});

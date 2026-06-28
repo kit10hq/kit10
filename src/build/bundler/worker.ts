@@ -58,6 +58,11 @@ export async function createWorker(worker_name: string) {
 			in_window_handler_parts.push(
 				`\t\t${JSON.stringify(`${path}:${specifier}`)}: ${specifier_imported},`,
 			);
+
+			// for dynamically imported handlers
+			// in_window_handler_parts.push(
+			// 	`\t\t${JSON.stringify(`${path}:${specifier}`)}: [() => import(${JSON.stringify(`../../${path}`)}), ${specifier}],`,
+			// );
 		}
 
 		in_window_worker_client_lines.push(

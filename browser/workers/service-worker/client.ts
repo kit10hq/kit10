@@ -30,7 +30,7 @@ export class Kit10ServiceWorkerClient {
 		readonly name: string,
 		url: string,
 		fallbackGetter: () => Promise<unknown>,
-		handlers: Record<string, (...args: unknown[]) => unknown>,
+		handlers: Record<string, (...args: unknown[]) => unknown>, // WorkerClientHandlers,
 	) {
 		if (is_created) {
 			throw new Error('Kit10ServiceWorkerClient was already created.');
@@ -46,10 +46,18 @@ export class Kit10ServiceWorkerClient {
 			const handler = handlers[method];
 			if (handler) {
 				const result = await handler(...args);
-				eventTarget.emit('+window->', {
-					id,
-					value: result,
-				});
+				eventTarget.emit('+window->', { id, value: result });
+
+				// for dynamically imported handlers
+				// const module_ = await handler[0]();
+				// const fn = module_[handler[1]];
+				// if (isFunction(fn)) {
+				// 	const result = await fn(...args);
+				// 	eventTarget.emit('+window->', {
+				// 		id,
+				// 		value: result,
+				// 	});
+				// }
 			}
 		});
 
