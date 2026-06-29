@@ -73,17 +73,35 @@ export async function clearDistDirectory(): Promise<void> {
 
 	await fs.mkdir(buildOptions.output_path, { recursive: true });
 
-	const entries = await fs.readdir(buildOptions.output_path, {
-		withFileTypes: true,
-	});
 	const promises = [];
 
-	for (const entry of entries) {
-		promises.push(
-			fs.rm(nodePath.join(buildOptions.output_path, entry.name), {
-				recursive: true,
-			}),
-		);
+	{
+		const entries = await fs.readdir(buildOptions.output_path, {
+			withFileTypes: true,
+		});
+		for (const entry of entries) {
+			const path = nodePath.join(buildOptions.output_path, entry.name);
+			if (path !== buildOptions.output_static_path) {
+				promises.push(
+					fs.rm(path, {
+						recursive: true,
+					}),
+				);
+			}
+		}
+	}
+
+	{
+		const entries = await fs.readdir(buildOptions.output_static_path, {
+			withFileTypes: true,
+		});
+		for (const entry of entries) {
+			promises.push(
+				fs.rm(nodePath.join(buildOptions.output_static_path, entry.name), {
+					recursive: true,
+				}),
+			);
+		}
 	}
 
 	await Promise.all(promises);

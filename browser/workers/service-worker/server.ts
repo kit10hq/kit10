@@ -45,6 +45,7 @@ export class Kit10ServiceWorkerServer {
 					await globalThis.clients.claim();
 
 					onServiceWorkerReady();
+					globalThis.dispatchEvent(new CustomEvent('kit10.claimed'));
 					// oxlint-disable-next-line no-console
 				})().catch(console.error),
 			);

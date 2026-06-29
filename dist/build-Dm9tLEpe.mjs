@@ -47,9 +47,18 @@ async function clearDistDirectory() {
 	directories_created.clear();
 	directories_creating.clear();
 	await fs$2.mkdir(output_path, { recursive: true });
-	const entries = await fs$2.readdir(output_path, { withFileTypes: true });
 	const promises = [];
-	for (const entry of entries) promises.push(fs$2.rm(nodePath.join(output_path, entry.name), { recursive: true }));
+	{
+		const entries = await fs$2.readdir(output_path, { withFileTypes: true });
+		for (const entry of entries) {
+			const path = nodePath.join(output_path, entry.name);
+			if (path !== output_static_path) promises.push(fs$2.rm(path, { recursive: true }));
+		}
+	}
+	{
+		const entries = await fs$2.readdir(output_static_path, { withFileTypes: true });
+		for (const entry of entries) promises.push(fs$2.rm(nodePath.join(output_static_path, entry.name), { recursive: true }));
+	}
 	await Promise.all(promises);
 }
 //#endregion

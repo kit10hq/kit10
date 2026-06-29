@@ -27,6 +27,7 @@ var Kit10ServiceWorkerServer = class {
 			event.waitUntil((async () => {
 				await globalThis.clients.claim();
 				onServiceWorkerReady();
+				globalThis.dispatchEvent(new CustomEvent("kit10.claimed"));
 			})().catch(console.error));
 		});
 		eventTarget.on(`->+window`, (event) => {
