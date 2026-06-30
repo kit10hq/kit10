@@ -1,329 +1,224 @@
-import nodePath from 'node:path';
-import * as esbuild from 'esbuild';
-import { type Element, HTMLRewriter } from 'html-rewriter-wasm';
-import { isAbsoluteOrSpecialPath, textDecoder, textEncoder } from '../utils.js';
+// oxlint-disable unicorn/no-process-exit
+
+import { escapeAttributeValue, type Promisable } from '../utils.js';
+import type { Artifact } from './artifact.js';
+import * as artifacts from './artifact.js';
+import { minifyHtml } from './html/minify.js';
+import { type ElementMetadata, parseHtml } from './html/parse.js';
+import { templateArtifact, wrapInTemplate } from './html/template.js';
 import * as buildOptions from './options.js';
+import { applyPlugins } from './plugins.js';
 
-export type HtmlContent = {
-	is_full_page: boolean;
-	kit10_head: string;
-	html: string;
-};
+/** Compiles non-HTML artifacts to HTML using plugins. */
+export async function compileToHtml() {
+	// compile all artifacts to HTML by plugins
+	await applyPlugins(artifacts.collections.pre_html);
 
-export const KIT10_INLINE_STYLE_ATTR = 'data-kit10-inline-style';
-
-type InlineScript = {
-	attributes: [string, string][];
-	contents: Promise<string>;
-	path: string;
-	placeholder: string;
-};
-
-const inlined = new Map<string, string>();
-const inlined_promises = new Map<string, Promise<string>>();
-const inline_style_sources = new Map<string, Set<string>>();
-
-/** Returns stylesheets marked as inline while rewriting an HTML file. */
-export function getInlineStyleSources(path: string): Set<string> {
-	return new Set(inline_style_sources.get(path));
-}
-
-/** Returns a safe value for an HTML attribute. */
-function escapeAttribute(value: string): string {
-	return value
-		.replaceAll('&', '&amp;')
-		.replaceAll('"', '&quot;')
-		.replaceAll('<', '&lt;')
-		.replaceAll('>', '&gt;');
-}
-
-/** Does actual bundling of JS/TS file into one. */
-async function bundleDo(path: string): Promise<string> {
-	const result = await esbuild.build({
-		absWorkingDir: buildOptions.source_path,
-		entryPoints: ['.' + path],
-		outdir: '/',
-		//
-		bundle: true,
-		format: 'esm',
-		minify: buildOptions.is_prod,
-		write: false,
-	});
-
-	const [output] = result.outputFiles;
-	if (!output) {
-		throw new Error('No output file');
-	}
-
-	const contents = textDecoder.decode(output.contents);
-	if (buildOptions.is_prod) {
-		inlined.set(path, contents);
-	}
-
-	return contents;
-}
-
-/** Bundles JS/TS file into one. */
-async function bundle(path: string): Promise<string> {
-	if (!path.startsWith('/')) {
-		throw new Error('Path for bundle must be absolute.');
-	}
-
-	if (inlined.has(path)) {
-		return inlined.get(path)!;
-	}
-
-	if (inlined_promises.has(path)) {
-		return inlined_promises.get(path)!;
-	}
-
-	const promise = bundleDo(path);
-	inlined_promises.set(path, promise);
-
-	const contents = await promise;
-	inlined_promises.delete(path);
-
-	return contents;
-}
-
-/**
- * Rewrites html.
- * @param path - The absolute file path of the html file.
- * @param contents - The html to rewrite.
- * @returns -
- */
-export async function rewriteHtml(
-	path: string,
-	contents: string,
-): Promise<HtmlContent> {
-	const dir = nodePath.dirname(path);
-	const scripts_to_inline: InlineScript[] = [];
-
-	let result = '';
-	let first_tag_name;
-	let is_kit10_head = false;
-	let kit10_head = '';
-	const rewriter = new HTMLRewriter((chunk) => {
-		const chunk_string = textDecoder.decode(chunk);
-		if (is_kit10_head) {
-			kit10_head += chunk_string;
-		} else {
-			result += chunk_string;
+	// check all entrypoint artifacts have been compiled to HTML
+	for (const artifact of artifacts.collections.pre_html) {
+		if (artifact.ext !== 'html') {
+			// oxlint-disable-next-line no-console
+			console.error(
+				`No plugin found for ".${artifact.ext}" pages (for "${artifact.project_path}").`,
+			);
+			process.exit(1);
 		}
-	});
 
-	rewriter.on('*', {
-		element(element) {
-			first_tag_name ??= element.tagName.toLowerCase();
-		},
-	});
+		artifacts.collections.html.add(artifact);
+	}
 
-	rewriter.on('kit10\\:head', {
-		element(element) {
-			is_kit10_head = true;
-			element.removeAndKeepContent();
-			element.onEndTag(() => {
-				is_kit10_head = false;
-			});
-		},
-	});
-
-	rewriter.on('img', {
-		element(node) {
-			const import_path = node.getAttribute('src');
-			if (import_path) {
-				node.setAttribute('src', absolutePath(dir, import_path));
-			}
-		},
-	});
-
-	registerScriptHandler(rewriter, dir, scripts_to_inline);
-	registerLinkHandler(rewriter, dir, path);
-
-	rewriter.write(textEncoder.encode(contents));
-	rewriter.end();
-
-	const html = await replaceInlineScripts(result, scripts_to_inline);
-
-	return {
-		is_full_page: first_tag_name === 'html',
-		kit10_head,
-		html,
-	};
+	artifacts.collections.pre_html.clear();
 }
 
-/** Registers script URL rewriting and kit10:inline script bundling. */
-function registerScriptHandler(
-	rewriter: HTMLRewriter,
-	dir: string,
-	scripts_to_inline: InlineScript[],
-): void {
-	let inline_script_index = 0;
-	rewriter.on('script', {
-		element(element) {
-			const import_path = element.getAttribute('src');
-			if (!import_path) {
-				return;
-			}
+/** Processes single HTML file. */
+async function processOneHtml(artifact: Artifact) {
+	const htmlParsed = await parseHtml(artifact);
+	artifact.update(wrapInTemplate(htmlParsed));
 
-			element.setAttribute('src', absolutePath(dir, import_path));
-
-			if (element.getAttribute('kit10:inline') === null) {
-				return;
-			}
-
-			const import_path_absolute = absolutePath(dir, import_path);
-			const inline_contents = bundle(import_path_absolute);
-			const placeholder = `kit10:inline-script:${inline_script_index++}`;
-
-			element.replace(`<!--${placeholder}-->`, { html: true });
-			scripts_to_inline.push({
-				attributes: getInlineScriptAttributes(element),
-				contents: inline_contents,
-				path: import_path_absolute,
-				placeholder,
-			});
-		},
-	});
+	for (const dependencyArtifact of templateArtifact.dependencies) {
+		artifact.link(dependencyArtifact);
+	}
 }
 
-/** Registers link URL rewriting and kit10:inline stylesheet markers. */
-function registerLinkHandler(
-	rewriter: HTMLRewriter,
-	dir: string,
-	html_path: string,
-): void {
-	rewriter.on('link', {
-		element(element) {
-			const import_path = element.getAttribute('href');
-			if (!import_path) {
-				return;
-			}
+/** Extracts resources (script, style, link, etc) from HTML, wraps HTML content with a common template... */
+export async function processHtml() {
+	const promises = [];
+	for (const artifact of artifacts.collections.html) {
+		promises.push(processOneHtml(artifact));
 
-			const import_path_absolute = absolutePath(dir, import_path);
-			element.setAttribute('href', import_path_absolute);
+		artifacts.collections.entrypoints.add(artifact);
+	}
 
-			if (
-				element.getAttribute('kit10:inline') !== null
-				&& isInlineStyleLink(element)
-			) {
-				addInlineStyleSource(html_path, import_path_absolute);
-				element.removeAttribute('kit10:inline');
-				element.setAttribute(KIT10_INLINE_STYLE_ATTR, import_path_absolute);
+	await Promise.all(promises);
+}
 
-				if (isPreloadStyleLink(element)) {
-					element.setAttribute('rel', 'stylesheet');
-					element.removeAttribute('as');
+const INLINE_TRESHOLD = buildOptions.config.build?.inlineTreshold ?? 2000;
+
+/** Puts back resources into the HTML pages. */
+export async function finalizeHtml() {
+	const promises = [];
+	for (const artifact of artifacts.collections.html) {
+		promises.push(finalizeHtmlOne(artifact));
+	}
+
+	await Promise.all(promises);
+}
+
+type Replacement = [string, string];
+
+/** Puts back resources into the HTML page. */
+async function finalizeHtmlOne(artifact: Artifact) {
+	let contents = await artifact.text();
+
+	const promises: Promisable<Replacement>[] = [];
+	for (const dependencyArtifact of artifact.dependencies) {
+		const script_metadata = dependencyArtifact.meta.script as
+			| ElementMetadata
+			| undefined;
+		if (script_metadata) {
+			promises.push(computeReplacementScript(artifact, dependencyArtifact));
+			continue;
+		}
+
+		const style_metadata = dependencyArtifact.meta.style as
+			| ElementMetadata
+			| undefined;
+		if (style_metadata) {
+			promises.push(computeReplacementStyle(artifact, dependencyArtifact));
+			continue;
+		}
+
+		const element_metadata = dependencyArtifact.meta.element as
+			| ElementMetadata
+			| undefined;
+		if (element_metadata) {
+			promises.push(computeReplacementElement(artifact, dependencyArtifact));
+			continue;
+		}
+	}
+
+	const replacements = await Promise.all(promises);
+	for (const [search, replace] of replacements) {
+		contents = contents.replaceAll(search, replace);
+	}
+
+	artifact.update(buildOptions.is_prod ? minifyHtml(contents) : contents);
+}
+
+/** Returns the replacement script tag for the given dependency artifact. */
+async function computeReplacementScript(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Promise<Replacement> {
+	const script_metadata = dependencyArtifact.meta.script as ElementMetadata;
+
+	let script_contents: string | undefined;
+	if (
+		script_metadata.inline
+		|| dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+	) {
+		// oxlint-disable-next-line no-await-in-loop
+		script_contents = await dependencyArtifact.text();
+
+		for (const artifact_ of dependencyArtifact.dependencies) {
+			artifact.link(artifact_);
+		}
+
+		artifact.unlink(dependencyArtifact);
+	}
+
+	let tag = '<script';
+	if (script_contents === undefined) {
+		tag += ` src="/${dependencyArtifact.project_path}"`;
+	}
+
+	if (script_metadata.attributes) {
+		for (const [key, value] of script_metadata.attributes) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+	}
+
+	tag += '>';
+
+	if (script_contents !== undefined) {
+		tag += script_contents;
+	}
+
+	tag += '</script>';
+
+	return [`<!--${dependencyArtifact.id}-->`, tag];
+}
+
+const LINK_ATTRS_REMOVE_ON_STYLE = new Set(['rel', 'as', 'onload']);
+
+/** Returns the replacement style tag for the given dependency artifact. */
+async function computeReplacementStyle(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Promise<Replacement> {
+	const style_metadata = dependencyArtifact.meta.style as ElementMetadata;
+
+	let script_contents: string | undefined;
+	if (
+		style_metadata.inline
+		// || dependencyArtifact.sizeUnsafe <= INLINE_TRESHOLD
+	) {
+		// oxlint-disable-next-line no-await-in-loop
+		script_contents = await dependencyArtifact.text();
+
+		for (const artifact_ of dependencyArtifact.dependencies) {
+			artifact.link(artifact_);
+		}
+
+		artifact.unlink(dependencyArtifact);
+	}
+
+	let tag = '';
+	if (script_contents === undefined) {
+		tag += `<link href="/${dependencyArtifact.project_path}"`;
+
+		for (const [key, value] of new Map([
+			['rel', 'stylesheet'],
+			...(style_metadata.attributes ?? []),
+		])) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
+
+		tag += '>';
+	} else {
+		tag += `<style`;
+
+		if (style_metadata.attributes) {
+			for (const [key, value] of style_metadata.attributes) {
+				if (!LINK_ATTRS_REMOVE_ON_STYLE.has(tag)) {
+					tag += ` ${key}="${escapeAttributeValue(value)}"`;
 				}
 			}
-		},
-	});
-}
+		}
 
-/** Registers a stylesheet that should be inlined after Vite processes it. */
-function addInlineStyleSource(html_path: string, path: string): void {
-	if (!inline_style_sources.has(html_path)) {
-		inline_style_sources.set(html_path, new Set<string>());
+		tag += `>${script_contents}</style>`;
 	}
 
-	inline_style_sources.get(html_path)!.add(path.replace(/[?#].*$/u, ''));
+	return [`<!--${dependencyArtifact.id}-->`, tag];
 }
 
-/** Replaces script placeholders with their bundled contents. */
-async function replaceInlineScripts(
-	html: string,
-	scripts_to_inline: InlineScript[],
-): Promise<string> {
-	const replacements = await Promise.all(
-		scripts_to_inline.map(async (script) => {
-			return {
-				html: await createInlineScriptHtml(script),
-				placeholder: script.placeholder,
-			};
-		}),
-	);
+/** Returns the replacement style tag for the given dependency artifact. */
+function computeReplacementElement(
+	artifact: Artifact,
+	dependencyArtifact: Artifact,
+): Replacement {
+	const metadata = dependencyArtifact.meta.element as ElementMetadata;
 
-	let result = html;
-	for (const replacement of replacements) {
-		result = result.replace(
-			`<!--${replacement.placeholder}-->`,
-			replacement.html,
-		);
+	let tag = '';
+	tag += `<${metadata.element} src="/${dependencyArtifact.project_path}"`;
+
+	if (metadata.attributes) {
+		for (const [key, value] of metadata.attributes) {
+			tag += ` ${key}="${escapeAttributeValue(value)}"`;
+		}
 	}
 
-	return result;
-}
+	tag += '>';
 
-/** Creates inline script HTML. */
-async function createInlineScriptHtml(script: InlineScript): Promise<string> {
-	const inlined_contents = await script.contents;
-	let html = `<script data-src="${escapeAttribute(script.path)}" vite-ignore`;
-
-	for (const [key, value] of script.attributes) {
-		html += ` ${key}="${escapeAttribute(value)}"`;
-	}
-
-	return `${html}>${escapeScriptContent(inlined_contents)}</script>`;
-}
-
-/** Returns script attributes that should survive inlining. */
-function getInlineScriptAttributes(element: Element): [string, string][] {
-	return [...element.attributes].filter(
-		([key]) =>
-			key !== 'src'
-			&& key !== 'kit10:inline'
-			&& key !== 'vite-ignore'
-			&& key !== 'data-src',
-	);
-}
-
-/**
- * Converts a relative path to absolute.
- * @param dir - The directory of the file.
- * @param path - The relative path to convert.
- * @returns -
- */
-function absolutePath(dir: string, path: string): string {
-	if (isAbsoluteOrSpecialPath(path)) {
-		return path;
-	}
-
-	return nodePath
-		.normalize(nodePath.join(dir, path))
-		.replace(buildOptions.source_path, '');
-}
-
-/** Escapes JavaScript text for embedding in a script tag. */
-function escapeScriptContent(value: string): string {
-	return value
-		.replaceAll('</script', '<\\/script')
-		.replaceAll('<!--', '<\\!--');
-}
-
-/** Returns whether a rel attribute contains a token. */
-function hasRel(rel: string | null, token: string): boolean {
-	return (
-		rel?.split(/\s+/u).some((rel_token) => rel_token.toLowerCase() === token)
-		?? false
-	);
-}
-
-/** Returns whether a link points to a stylesheet that should be inlined. */
-function isInlineStyleLink(element: {
-	getAttribute(name: string): string | null;
-}): boolean {
-	return (
-		hasRel(element.getAttribute('rel'), 'stylesheet')
-		|| isPreloadStyleLink(element)
-	);
-}
-
-/** Returns whether a link preloads a stylesheet. */
-function isPreloadStyleLink(element: {
-	getAttribute(name: string): string | null;
-}): boolean {
-	return (
-		hasRel(element.getAttribute('rel'), 'preload')
-		&& element.getAttribute('as')?.toLowerCase() === 'style'
-	);
+	return [`<!--${dependencyArtifact.id}-->`, tag];
 }

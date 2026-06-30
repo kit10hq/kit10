@@ -1,0 +1,29 @@
+{
+	"compilerOptions": {
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"target": "es2022",
+		"moduleDetection": "force",
+		"moduleResolution": "bundler",
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"module": "preserve",
+		"noEmit": true,
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
+		"types": [],
+		"declaration": true,
+		"isolatedDeclarations": false,
+		"importHelpers": true,
+		"paths": {
+			"@/*": ["../src/*"],
+			"$src/*": ["../src/*"],
+			"$workers/*": ["./types/workers/*"]
+		},
+		"rootDirs": [".."]
+	},
+	"include": ["../src/", "./types/workers.d.ts"],
+	"exclude": ["../**/*.test.ts", "../dist/", "../node_modules/"]
+}
