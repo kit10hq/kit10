@@ -53,6 +53,8 @@ function getLoaderByFilePath(path: string): Loader | undefined {
 	return 'copy';
 }
 
+const esbuild_entrypoints = new Map<string, Artifact>();
+
 const esbuildKit10Plugin: esbuild.Plugin = {
 	name: 'kit10',
 	setup(build) {
@@ -110,6 +112,7 @@ const esbuildKit10Plugin: esbuild.Plugin = {
 			const artifact = new Artifact(
 				args.path.replace(options.source_path, '').slice(1),
 			);
+			esbuild_entrypoints.set(artifact.project_path, artifact);
 			tempArtifacts.add(artifact);
 
 			// if (artifact.project_path.includes('worker')) {
@@ -226,9 +229,11 @@ export async function bundle(): Promise<void> {
 		let artifact: Artifact;
 		if (
 			meta.project_path !== undefined
-			&& artifacts.exists(meta.project_path)
+			&& esbuild_entrypoints.has(meta.project_path)
+			&& nodePath.dirname(meta.project_path)
+				=== nodePath.dirname(output_project_path)
 		) {
-			artifact = new Artifact(meta.project_path);
+			artifact = esbuild_entrypoints.get(meta.project_path)!;
 			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1)!);
 		} else {
 			artifact = new Artifact(output_project_path);

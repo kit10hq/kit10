@@ -1,4 +1,6 @@
-import { minify } from '@minify-html/node';
+import pkg from '@minify-html/node';
+
+const { minify } = pkg;
 
 const MINIFY_HTML_OPTIONS: Parameters<typeof minify>[1] = {
 	allow_noncompliant_unquoted_attribute_values: false,

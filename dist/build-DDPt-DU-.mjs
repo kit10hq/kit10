@@ -12,7 +12,7 @@ import * as esbuild from "esbuild";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
-import { minify } from "@minify-html/node";
+import pkg from "@minify-html/node";
 //#region src/build/fs/directory.ts
 const directories_created = /* @__PURE__ */ new Set();
 const directories_creating = /* @__PURE__ */ new Map();
@@ -289,10 +289,6 @@ var Artifact = class Artifact {
 		return this.toString();
 	}
 };
-/** Returns whether an artifact exists for the given project path. */
-function exists(project_path) {
-	return all.has(project_path);
-}
 /** Writes a single artifact to disk. */
 async function flushOne(artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));
@@ -547,6 +543,7 @@ function getLoaderByFilePath(path) {
 	}
 	return "copy";
 }
+const esbuild_entrypoints = /* @__PURE__ */ new Map();
 const esbuildKit10Plugin = {
 	name: "kit10",
 	setup(build) {
@@ -577,6 +574,7 @@ const esbuildKit10Plugin = {
 				loader: "js"
 			};
 			const artifact = new Artifact(args.path.replace(source_path, "").slice(1));
+			esbuild_entrypoints.set(artifact.project_path, artifact);
 			tempArtifacts.add(artifact);
 			await applyPlugins([artifact]);
 			const loader = getLoaderByOnLoadArgs(args) ?? getLoaderByFilePath(artifact.project_path);
@@ -650,8 +648,8 @@ async function bundle() {
 		const meta = metafile.get(output_project_path);
 		if (meta === void 0) throw new Error(`No metafile entry found for ${output_project_path}.`);
 		let artifact;
-		if (meta.project_path !== void 0 && exists(meta.project_path)) {
-			artifact = new Artifact(meta.project_path);
+		if (meta.project_path !== void 0 && esbuild_entrypoints.has(meta.project_path) && nodePath.dirname(meta.project_path) === nodePath.dirname(output_project_path)) {
+			artifact = esbuild_entrypoints.get(meta.project_path);
 			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1));
 		} else artifact = new Artifact(output_project_path);
 		artifact.update(output.contents);
@@ -871,6 +869,7 @@ function wrapInTemplate(pageHtmlParsed) {
 }
 //#endregion
 //#region src/build/html/minify.ts
+const { minify } = pkg;
 const MINIFY_HTML_OPTIONS = {
 	allow_noncompliant_unquoted_attribute_values: false,
 	allow_optimal_entities: false,
