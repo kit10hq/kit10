@@ -1,14 +1,15 @@
 import { a as server_runtime, i as output_static_path, n as is_prod, r as output_path, t as config } from "./options-D2oYgwiy.mjs";
 import { n as source_path, t as project_path } from "./options-bbHkPexD.mjs";
 import { a as createLetterId, i as createId, n as workers_imports, o as escapeAttributeValue, t as workers_data } from "./workers-BbNt0iik.mjs";
-import { readdirSync } from "node:fs";
 import nodePath from "node:path";
+import fs, { readdirSync } from "node:fs";
 import * as fs$2 from "node:fs/promises";
 import fs$1 from "node:fs/promises";
 import { inspect, promisify } from "node:util";
 import zlib from "node:zlib";
 import { createPathsMatcher, getTsconfig } from "get-tsconfig";
 import * as esbuild from "esbuild";
+import { parseSync } from "oxc-parser";
 import browserslist from "browserslist";
 import { browserslistToTargets, transform } from "lightningcss";
 import { HTMLRewriter } from "html-rewriter-wasm";
@@ -256,11 +257,16 @@ var Artifact = class Artifact {
 		dependencies.delete(this);
 		for (const collection of Object.values(collections)) collection.delete(this);
 	}
-	#is_flushed = false;
+	#flush_promise;
+	get is_flushed() {
+		return this.#flush_promise !== void 0;
+	}
 	/** Writes the artifact to disk. */
-	async flush() {
-		if (this.#is_flushed) return;
-		this.#is_flushed = true;
+	flush() {
+		this.#flush_promise ??= this.#flush();
+		return this.#flush_promise;
+	}
+	async #flush() {
 		const output_path = nodePath.join(output_static_path, this.#project_path);
 		let gzip_size;
 		if (this.#content === null && !is_prod && EXT_COMPRESS.has(this.ext) !== true) await fs$1.cp(this.absolute_path, output_path);
@@ -291,6 +297,7 @@ var Artifact = class Artifact {
 };
 /** Writes a single artifact to disk. */
 async function flushOne(artifact) {
+	if (artifact.is_flushed) return;
 	await createDirectory(nodePath.dirname(artifact.project_path));
 	const promises = [artifact.flush()];
 	const link_header_parts = [];
@@ -314,6 +321,30 @@ async function flush() {
 	for (const artifact of collections.entrypoints.values()) promises.push(flushOne(artifact));
 	await Promise.all(promises);
 	if (is_prod) console.table(flushed_table);
+}
+//#endregion
+//#region src/build/bundler/imports.ts
+/** Scans JavaScript code and absolutifies import paths. */
+function rewriteImports(project_path, code) {
+	const dirname = nodePath.dirname("/" + project_path);
+	const ast = parseSync(project_path, code);
+	let position_delta = 0;
+	for (const import_ of ast.module.staticImports) {
+		const { value: path, start, end } = import_.moduleRequest;
+		const absolute_path = nodePath.normalize(nodePath.join(dirname, path));
+		const substring = JSON.stringify(absolute_path);
+		code = code.slice(0, start + position_delta) + substring + code.slice(end + position_delta);
+		position_delta += substring.length - (end - start);
+	}
+	for (const import_ of ast.module.dynamicImports) {
+		const { start, end } = import_.moduleRequest;
+		const path = code.slice(start + 1 + position_delta, end - 1 + position_delta);
+		const absolute_path = nodePath.normalize(nodePath.join(dirname, path));
+		const substring = JSON.stringify(absolute_path);
+		code = code.slice(0, start + position_delta) + substring + code.slice(end + position_delta);
+		position_delta += substring.length - (end - start);
+	}
+	return code;
 }
 //#endregion
 //#region src/build/bundler/options.ts
@@ -652,7 +683,7 @@ async function bundle() {
 			artifact = esbuild_entrypoints.get(meta.project_path);
 			artifact.updateFilename(output_project_path.split(nodePath.sep).at(-1));
 		} else artifact = new Artifact(output_project_path);
-		artifact.update(output.contents);
+		artifact.update(rewriteImports(artifact.project_path, output.text));
 		collections.bundle.add(artifact);
 	}
 	for (const [project_path, { imports }] of metafile) {
@@ -908,8 +939,11 @@ async function compileToHtml() {
 /** Processes single HTML file. */
 async function processOneHtml(artifact$1) {
 	const htmlParsed = await parseHtml(artifact$1);
-	artifact$1.update(wrapInTemplate(htmlParsed));
-	for (const dependencyArtifact of artifact.dependencies) artifact$1.link(dependencyArtifact);
+	if (htmlParsed.is_full_page) artifact$1.update(htmlParsed.html);
+	else {
+		artifact$1.update(wrapInTemplate(htmlParsed));
+		for (const dependencyArtifact of artifact.dependencies) artifact$1.link(dependencyArtifact);
+	}
 }
 /** Extracts resources (script, style, link, etc) from HTML, wraps HTML content with a common template... */
 async function processHtml() {
@@ -1244,6 +1278,10 @@ artifact.delete();
 await flush();
 await flushRouter();
 if (!is_prod) await formatOutput();
+{
+	const assets_path = nodePath.join(source_path, "+assets");
+	if (fs.existsSync(assets_path)) fs.cpSync(assets_path, nodePath.join(output_static_path, "+assets"), { recursive: true });
+}
 /**
 * Format nanoseconds as a human-readable string.
 * @param nanoseconds - The number of nanoseconds to format.

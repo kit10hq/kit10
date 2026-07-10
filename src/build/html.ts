@@ -33,10 +33,14 @@ export async function compileToHtml() {
 /** Processes single HTML file. */
 async function processOneHtml(artifact: Artifact) {
 	const htmlParsed = await parseHtml(artifact);
-	artifact.update(wrapInTemplate(htmlParsed));
+	if (htmlParsed.is_full_page) {
+		artifact.update(htmlParsed.html);
+	} else {
+		artifact.update(wrapInTemplate(htmlParsed));
 
-	for (const dependencyArtifact of templateArtifact.dependencies) {
-		artifact.link(dependencyArtifact);
+		for (const dependencyArtifact of templateArtifact.dependencies) {
+			artifact.link(dependencyArtifact);
+		}
 	}
 }
 

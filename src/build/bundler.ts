@@ -7,6 +7,7 @@ import * as options from '../options.js';
 import { createId } from '../utils.js';
 import * as artifacts from './artifact.js';
 import { Artifact } from './artifact.js';
+import { rewriteImports } from './bundler/imports.js';
 import {
 	esbuild_options,
 	getAbsolutePathOnResolve,
@@ -239,7 +240,7 @@ export async function bundle(): Promise<void> {
 			artifact = new Artifact(output_project_path);
 		}
 
-		artifact.update(output.contents);
+		artifact.update(rewriteImports(artifact.project_path, output.text));
 
 		artifacts.collections.bundle.add(artifact);
 	}

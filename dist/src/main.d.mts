@@ -42,6 +42,7 @@ declare class Artifact {
   append(data: ArtifactContent): void;
   /** Deletes the artifact from build context. */
   delete(): void;
+  get is_flushed(): boolean;
   /** Writes the artifact to disk. */
   flush(): Promise<void>;
   toString(): string;

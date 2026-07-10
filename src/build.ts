@@ -1,5 +1,7 @@
 // oxlint-disable unicorn/no-process-exit
 
+import fs from 'node:fs';
+import nodePath from 'node:path';
 import * as artifacts from './build/artifact.js';
 import { bundle } from './build/bundler.js';
 import { formatOutput } from './build/formatter.js';
@@ -8,6 +10,7 @@ import { templateArtifact } from './build/html/template.js';
 import { compileToHtml, finalizeHtml, processHtml } from './build/html.js';
 import * as buildOptions from './build/options.js';
 import { flushRouter, processEntrypoints } from './build/router.js';
+import * as options from './options.js';
 
 const start = process.hrtime.bigint();
 
@@ -34,6 +37,19 @@ await flushRouter();
 
 if (!buildOptions.is_prod) {
 	await formatOutput();
+}
+
+{
+	const assets_path = nodePath.join(options.source_path, '+assets');
+	if (fs.existsSync(assets_path)) {
+		fs.cpSync(
+			assets_path,
+			nodePath.join(buildOptions.output_static_path, '+assets'),
+			{
+				recursive: true,
+			},
+		);
+	}
 }
 
 /**

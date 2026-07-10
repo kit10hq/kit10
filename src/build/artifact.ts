@@ -272,16 +272,21 @@ export class Artifact {
 		}
 	}
 
-	#is_flushed = false;
+	// #is_flushed = false;
+	#flush_promise: Promise<void> | undefined;
+
+	get is_flushed(): boolean {
+		return this.#flush_promise !== undefined;
+	}
 
 	/** Writes the artifact to disk. */
-	async flush(): Promise<void> {
-		if (this.#is_flushed) {
-			return;
-		}
+	flush(): Promise<void> {
+		this.#flush_promise ??= this.#flush();
 
-		this.#is_flushed = true;
+		return this.#flush_promise;
+	}
 
+	async #flush(): Promise<void> {
 		const output_path = nodePath.join(
 			buildOptions.output_static_path,
 			this.#project_path,
@@ -337,6 +342,10 @@ export function exists(project_path: string): boolean {
 
 /** Writes a single artifact to disk. */
 async function flushOne(artifact: Artifact) {
+	if (artifact.is_flushed) {
+		return;
+	}
+
 	await createDirectory(nodePath.dirname(artifact.project_path));
 
 	const promises = [artifact.flush()];
