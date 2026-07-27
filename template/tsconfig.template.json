@@ -2,7 +2,7 @@
 	"compilerOptions": {
 		"esModuleInterop": true,
 		"skipLibCheck": true,
-		"target": "es2024",
+		"target": "es2025",
 		"moduleDetection": "force",
 		"moduleResolution": "bundler",
 		"isolatedModules": true,
@@ -12,7 +12,7 @@
 		"noImplicitOverride": true,
 		"module": "preserve",
 		"noEmit": true,
-		"lib": ["es2024", "dom", "dom.iterable"],
+		"lib": ["es2025", "dom", "dom.iterable"],
 		"types": [],
 		"declaration": true,
 		"isolatedDeclarations": false,
