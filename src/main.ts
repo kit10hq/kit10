@@ -17,6 +17,7 @@ function runBuild() {
 	child = spawn(process.argv[0]!, [...process.argv.slice(1), '--no-watch'], {
 		stdio: 'inherit',
 		env: {
+			...process.env,
 			NODE_ENV: 'development',
 		},
 	});
