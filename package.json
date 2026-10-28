@@ -54,7 +54,7 @@
 		"unplugin-unused": "0.5.7"
 	},
 	"scripts": {
-		"build": "tsdown browser/workers/worker/client.ts browser/workers/worker/server.ts browser/workers/service-worker/client.ts browser/workers/service-worker/server.ts src/main.ts src/reexports/hono.ts src/reexports/ws.ts --unused --dts --format esm",
+		"build": "tsdown browser/workers/worker/client.ts browser/workers/worker/server.ts browser/workers/service-worker/client.ts browser/workers/service-worker/server.ts src/main.ts src/reexports/hono.ts src/reexports/ws.ts --dts --format esm --unused",
 		"check": "bun run lint && bun run build",
 		"lint": "biome format && oxlint && eslint . && tsc",
 		"pack": "bun run check && dev pack create"

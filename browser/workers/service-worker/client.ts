@@ -69,6 +69,25 @@ export class Kit10ServiceWorkerClient {
 				this.#response_resolvers.delete(id);
 			}
 		});
+
+		// we should send a request to serviceWorker when the page becomes visible
+		// to wake it up if browser stopped it for any reason
+		// eslint-disable-next-line promise/catch-or-return
+		is_page_controllable_promise.then((is_page_controllable) => {
+			// eslint-disable-next-line promise/always-return
+			if (is_page_controllable) {
+				globalThis.addEventListener(
+					'visibilitychange',
+					() => {
+						if (globalThis.document.visibilityState === 'visible') {
+							// oxlint-disable-next-line no-console
+							this.#sendToWorker('').catch(console.error);
+						}
+					},
+					{ passive: true },
+				);
+			}
+		});
 	}
 
 	start(): Promise<void> {

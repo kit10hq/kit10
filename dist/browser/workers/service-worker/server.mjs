@@ -1,6 +1,5 @@
 import { n as eventTarget, r as parseWorkerMessage, t as createId } from "../../../utils-BNcSbbpj.mjs";
 //#region browser/workers/service-worker/server.ts
-const { promise: readyPromise, resolve: onServiceWorkerReady } = Promise.withResolvers();
 var Kit10ServiceWorkerServer = class {
 	name;
 	id = createId();
@@ -26,7 +25,6 @@ var Kit10ServiceWorkerServer = class {
 		globalThis.addEventListener("activate", (event) => {
 			event.waitUntil((async () => {
 				await globalThis.clients.claim();
-				onServiceWorkerReady();
 				globalThis.dispatchEvent(new CustomEvent("kit10.claimed"));
 			})().catch(console.error));
 		});
@@ -57,9 +55,12 @@ var Kit10ServiceWorkerServer = class {
 		for (const window_client of window_clients) window_client.postMessage(structuredClone(message));
 	}
 };
+const tick_promise = new Promise((resolve) => {
+	setTimeout(resolve, 0);
+});
 /** Broadcast a message to all windows. As it is a broadcast, response is not expected. */
 async function broadcastToWindows(method, args) {
-	if (globalThis.constructor.name !== "Window") await readyPromise;
+	if (globalThis.constructor.name !== "Window") await tick_promise;
 	const id = createId();
 	eventTarget.emit("->+window", {
 		id,

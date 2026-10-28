@@ -3,9 +3,9 @@
 import { eventTarget, parseWorkerMessage } from '../events.js';
 import { createId } from '../utils.js';
 
-const { promise: readyPromise, resolve: onServiceWorkerReady } =
-	// oxlint-disable-next-line typescript/no-invalid-void-type
-	Promise.withResolvers<void>();
+// const { promise: readyPromise, resolve: onServiceWorkerReady } =
+// 	// oxlint-disable-next-line typescript/no-invalid-void-type
+// 	Promise.withResolvers<void>();
 
 export class Kit10ServiceWorkerServer {
 	readonly id = createId();
@@ -44,7 +44,7 @@ export class Kit10ServiceWorkerServer {
 				(async () => {
 					await globalThis.clients.claim();
 
-					onServiceWorkerReady();
+					// onServiceWorkerReady();
 					globalThis.dispatchEvent(new CustomEvent('kit10.claimed'));
 					// oxlint-disable-next-line no-console
 				})().catch(console.error),
@@ -101,6 +101,10 @@ export class Kit10ServiceWorkerServer {
 
 // In service workers, window can not "respond" to messages because service worker broadcasts a message to all windows.
 
+const tick_promise = new Promise<void>((resolve) => {
+	setTimeout(resolve, 0);
+});
+
 /** Broadcast a message to all windows. As it is a broadcast, response is not expected. */
 export async function broadcastToWindows(
 	method: string,
@@ -112,7 +116,7 @@ export async function broadcastToWindows(
 	// so, we need to wait for the next tick before sending the request,
 	// waiting for worker code to be loaded and executed at top level.
 	if (globalThis.constructor.name !== 'Window') {
-		await readyPromise;
+		await tick_promise;
 	}
 
 	const id = createId();

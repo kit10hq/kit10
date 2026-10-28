@@ -36,6 +36,11 @@ var Kit10ServiceWorkerClient = class {
 				this.#response_resolvers.delete(id);
 			}
 		});
+		is_page_controllable_promise.then((is_page_controllable) => {
+			if (is_page_controllable) globalThis.addEventListener("visibilitychange", () => {
+				if (globalThis.document.visibilityState === "visible") this.#sendToWorker("").catch(console.error);
+			}, { passive: true });
+		});
 	}
 	start() {
 		this.#start_promise ??= this.#start();
