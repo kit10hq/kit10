@@ -1,3 +1,4 @@
+import { escapeRegExp } from 'es-toolkit/string';
 import * as buildOptions from '../options.js';
 import { type WalkSpecificity, WalkSpecificityType } from './file-tree.js';
 
@@ -10,6 +11,7 @@ type FSEntryRoute = {
 	route_part: string;
 	specificity: WalkSpecificity;
 };
+type SegmentPart = string | { name: string };
 
 /**
  * Checks if file is an entrypoint file (i.e. ends with `+page.html`).
@@ -31,16 +33,10 @@ export function getEntrypointName(name: string): {
 }
 
 /**
- * Returns specificity for route.
- *
- * Values:
- * - 0: static route (e.g. `/foo`)
- * - 1: route with parameter (e.g. `/foo-:id`)
- * - 2: route with optional parameter (e.g. `/foo-:id?`)
- * - 3: route with greedy parameter (e.g. `/foo-:id+`)
- * - 4: (NOT USED) route with wildcard (e.g. `/*`)
- * @param name -
- * @returns -
+ * Converts a file or directory name into runtime-specific route segments.
+ * Optional parameters expand into present and omitted variants; an optional
+ * extension also omits its preceding dot. Each variant retains the original
+ * parameter specificity so explicit routes take precedence over fallbacks.
  */
 export function parseFilename(name: string): FSEntryRoute[] {
 	if (name.length === 0) {
@@ -50,12 +46,12 @@ export function parseFilename(name: string): FSEntryRoute[] {
 	// Optional catch-all uses double brackets [[...slug]]
 	const match_optional_catch_all = RE_OPTIONAL_CATCH_ALL.exec(name);
 	if (match_optional_catch_all) {
-		// We return a sentinel; caller will produce both '/base' and '/base/:slug+'
+		// An empty segment represents the parent route without a trailing slash.
 		return [
 			{
 				route_part: '',
 				specificity: {
-					type: WalkSpecificityType.STATIC,
+					type: WalkSpecificityType.CATCH_ALL,
 					static_length: 0,
 				},
 			},
@@ -83,79 +79,65 @@ export function parseFilename(name: string): FSEntryRoute[] {
 		];
 	}
 
-	let has_optional = false;
-	let static_length = name.length;
-	// const route_part = name.replaceAll(
-	// 	// eslint-disable-next-line prefer-named-capture-group
-	// 	/(\[([a-z_][\da-z_]*)\]|\[\[([a-z_][\da-z_]*)\]\])([^\da-z_]|$)/giu,
-	// 	(...args) => {
-	// 		static_length -= args[1].length;
+	let variants: SegmentPart[][] = [[]];
+	let cursor = 0;
+	let type = WalkSpecificityType.STATIC;
+	for (const match of name.matchAll(
+		/\[\[(?<optional>[a-z_][\da-z_]*)\]\]|\[(?<required>[a-z_][\da-z_]*)\]/giu,
+	)) {
+		const literal = name.slice(cursor, match.index);
+		const { optional } = match.groups!;
+		const parameter = { name: optional ?? match.groups!.required! };
+		if (optional === undefined) {
+			type = Math.max(type, WalkSpecificityType.PARAMETER);
+			variants = variants.map((parts) => [...parts, literal, parameter]);
+		} else {
+			type = WalkSpecificityType.PARAMETER_OPTIONAL;
+			variants = variants.flatMap((parts) => [
+				[...parts, literal, parameter],
+				[...parts, literal.endsWith('.') ? literal.slice(0, -1) : literal],
+			]);
+		}
 
-	// 		if (args[3] !== undefined) {
-	// 			has_optional = true;
-	// 			return `:${args[3]}?${args[4]}`;
-	// 		}
-
-	// 		return `:${args[2]}${args[4]}`;
-	// 	},
-	// );
-	const route_part = name
-		.replaceAll(
-			/\[\[(?<parameter_name>[a-z_][a-z_\d]*)\]\](?<next_char>[^\da-z_]|$)/giu,
-			(substring, parameter_name, next_char) => {
-				static_length -= substring.length - next_char.length;
-
-				has_optional = true;
-				return `:${getParameterRoutePart(parameter_name!, true)}${next_char}`;
-			},
-		)
-		.replaceAll(
-			/\[(?<parameter_name>[a-z_][a-z_\d]*)\](?<next_char>[^\da-z_]|$)/giu,
-			(substring, parameter_name, next_char) => {
-				static_length -= substring.length - next_char.length;
-
-				return `:${getParameterRoutePart(parameter_name!, false)}${next_char}`;
-			},
-		);
-
-	// something was replaced
-	if (name !== route_part) {
-		return [
-			{
-				route_part,
-				specificity: {
-					type: has_optional
-						? WalkSpecificityType.PARAMETER_OPTIONAL
-						: WalkSpecificityType.PARAMETER,
-					static_length,
-				},
-			},
-		];
+		cursor = match.index + match[0].length;
 	}
 
-	if (name.includes('[') !== true) {
-		return [
-			{
-				route_part,
-				specificity: {
-					type: WalkSpecificityType.STATIC,
-					static_length: 0,
-				},
-			},
-		];
-	}
+	return variants.map((parts) => {
+		parts.push(name.slice(cursor));
+		const literals = parts.filter((part) => typeof part === 'string');
+		if (literals.some((part) => /[[\]]/u.test(part))) {
+			throw new Error(`Invalid filename "${name}".`);
+		}
 
-	throw new Error(`Invalid filename "${name}".`);
+		return {
+			route_part: getSegmentRoutePart(parts),
+			specificity: { type, static_length: literals.join('').length },
+		};
+	});
 }
 
-/** Return route part for parameter. */
-function getParameterRoutePart(name: string, optional: boolean): string {
-	if (buildOptions.server_runtime === 'hono') {
-		return `:${name}${optional ? '?' : ''}`;
+/** Compiles a complete segment, including literal text around parameters. */
+function getSegmentRoutePart(parts: SegmentPart[]): string {
+	const parameters = parts.filter((part) => typeof part !== 'string');
+	const pattern = parts
+		.map((part) => (typeof part === 'string' ? escapeRegExp(part) : '[^/]+'))
+		.join('');
+	if (buildOptions.server_runtime === 'nginx') {
+		return pattern;
 	}
 
-	if (buildOptions.server_runtime === 'nginx') {
-		return optional ? '(?:[^/]+)?' : '[^/]+';
+	if (buildOptions.server_runtime === 'hono') {
+		if (parameters.length === 0) {
+			return parts.join('');
+		}
+
+		if (parameters.length === 1 && pattern === '[^/]+') {
+			return `:${parameters[0]!.name}`;
+		}
+
+		// Hono captures custom patterns as a whole segment, not separate fields.
+		const name = parameters.map((parameter) => parameter.name).join('_');
+		return `:__kit10_${name}{${pattern}}`;
 	}
 
 	throw new Error(

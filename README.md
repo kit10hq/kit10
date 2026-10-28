@@ -242,6 +242,9 @@ Use double brackets for optional parameters.
 | - | - |
 | `src/users/[[id]]+page.html` | `/users`, `/users/123` |
 | `src/files/[name].[[ext]]+page.html` | `/files/readme`, `/files/logo.svg` |
+| `src/[[lang]]/about+page.html` | `/about`, `/en/about` |
+
+Optional parameters expand into routes with and without the parameter. Omitting a whole segment also omits its slash; omitting an extension omits its preceding dot. Explicit pages and index pages take precedence over optional fallbacks.
 
 ### Catch-all Parameters
 
@@ -252,7 +255,7 @@ Use `[...name]` to match the rest of a path, or `[[...name]]` to also match the 
 | `src/docs/[...path]+page.html` | `/docs/getting-started`, `/docs/api/routes` |
 | `src/docs/[[...path]]+page.html` | `/docs`, `/docs/getting-started`, `/docs/api/routes` |
 
-Catch-all parameters are supported in page file names. Optional catch-all parameters are not supported as directory names because they expand to more than one route.
+Catch-all parameters are supported in page file names. Optional catch-all parameters are not supported as directory names.
 
 ### Page Head Content
 

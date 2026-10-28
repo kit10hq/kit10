@@ -40,7 +40,15 @@ type RouteData = {
  */
 // oxlint-disable-next-line max-lines-per-function
 export function getRoutes(path: string): RouteData[] {
-	return flatState(walk(path));
+	const seen = new Set<string>();
+	return flatState(walk(path)).filter(({ route }) => {
+		if (seen.has(route)) {
+			return false;
+		}
+
+		seen.add(route);
+		return true;
+	});
 }
 
 /**
@@ -91,20 +99,14 @@ function walk(path: string, state?: WalkStateDir): WalkStateDir {
 			const route_defs = parseFilename(entrypoint.name);
 			// console.log('route_defs', route_defs);
 			for (const route_def of route_defs) {
-				if (
-					route_def.route_part.length === 0
-					|| route_def.route_part === 'index'
-				) {
+				if (entrypoint.name === 'index') {
 					state.file = {
 						absolute_path: entry_path,
 						ext: entrypoint.ext,
 					};
 				} else {
 					state.children.push({
-						route:
-							(state.route === '/' ? '' : state.route)
-							+ nodePath.sep
-							+ route_def.route_part,
+						route: appendRoutePart(state.route, route_def.route_part),
 						file: {
 							absolute_path: entry_path,
 							ext: entrypoint.ext,
@@ -115,31 +117,39 @@ function walk(path: string, state?: WalkStateDir): WalkStateDir {
 			}
 		} else if (entry.isDirectory()) {
 			const route_defs = parseFilename(entry.name);
-			if (route_defs.length > 1) {
+			if (
+				route_defs.length > 1
+				&& route_defs.some(
+					(route_def) =>
+						route_def.specificity.type === WalkSpecificityType.CATCH_ALL,
+				)
+			) {
 				throw new Error(
 					`Invalid directory name "${entry.name}" at "${entry_path}".`,
 				);
 			}
 
-			const route_def = route_defs[0]!;
-			// console.log('directory', route_def);
-			const walk_state_child: WalkStateDir = {
-				file: undefined,
-				route:
-					(state.route === '/' ? '' : state.route)
-					+ nodePath.sep
-					+ route_def.route_part,
-				specificity: route_def.specificity,
-				children: [],
-			};
-			state.children.push(walk_state_child);
-			walk(entry_path, walk_state_child);
+			for (const route_def of route_defs) {
+				const walk_state_child: WalkStateDir = {
+					file: undefined,
+					route: appendRoutePart(state.route, route_def.route_part),
+					specificity: route_def.specificity,
+					children: [],
+				};
+				state.children.push(walk_state_child);
+				walk(entry_path, walk_state_child);
+			}
 		}
 	}
 
 	sortRoutes(state);
 
 	return state;
+}
+
+/** Appends a URL segment, keeping the parent path for an omitted parameter. */
+function appendRoutePart(parent: string, part: string): string {
+	return part.length === 0 ? parent : `${parent === '/' ? '' : parent}/${part}`;
 }
 
 /**

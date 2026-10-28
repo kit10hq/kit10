@@ -56,7 +56,7 @@ export async function flushRouter(): Promise<void> {
 		const app_routes_js = [];
 		for (const [route, artifact] of app_routes.entries()) {
 			app_routes_js.push(
-				`app.get('${route}', serveFile('/${artifact.project_path}'));`,
+				`app.get(${JSON.stringify(route)}, serveFile(${JSON.stringify(`/${artifact.project_path}`)}));`,
 			);
 		}
 
