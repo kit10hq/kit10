@@ -103,8 +103,11 @@ export class Artifact {
 		return newArtifact;
 	}
 
+	/** Stores the import tree for this artifact. */
+	import_tree_dependencies = new WeakSet<Artifact>();
+
 	/** Adds artifact as a dependency of this artifact. */
-	link(artifact: Artifact): void {
+	link(artifact: Artifact, is_direct = true): void {
 		if (!dependencies.has(this)) {
 			dependencies.set(this, new Set<Artifact>());
 		}
@@ -116,6 +119,10 @@ export class Artifact {
 		}
 
 		dependents.get(artifact)!.add(this);
+
+		if (is_direct) {
+			this.import_tree_dependencies.add(artifact);
+		}
 	}
 
 	/** Removes artifact as a dependency of this artifact. */
@@ -127,6 +134,8 @@ export class Artifact {
 		if (!childArtifact_dependents || childArtifact_dependents.size === 0) {
 			artifact.delete();
 		}
+
+		this.import_tree_dependencies.delete(artifact);
 	}
 
 	get project_path(): string {
@@ -254,6 +263,7 @@ export class Artifact {
 		if (thisArtifact_dependents) {
 			for (const dependentArtifact of thisArtifact_dependents) {
 				dependencies.get(dependentArtifact)?.delete(this);
+				dependentArtifact.import_tree_dependencies.delete(this);
 			}
 		}
 
@@ -349,27 +359,32 @@ async function flushOne(artifact: Artifact) {
 	await createDirectory(nodePath.dirname(artifact.project_path));
 
 	const promises = [artifact.flush()];
-	const link_header_parts: string[] = [];
 	for (const dependencyArtifact of artifact.dependencies) {
 		promises.push(flushOne(dependencyArtifact));
-
-		switch (dependencyArtifact.ext) {
-			case 'js':
-				link_header_parts.push(
-					`</${encodeURI(dependencyArtifact.project_path)}>; rel=modulepreload`,
-				);
-				break;
-			case 'css':
-				link_header_parts.push(
-					`</${encodeURI(dependencyArtifact.project_path)}>; rel=preload; as=style`,
-				);
-				break;
-			// no default
-		}
 	}
 
-	if (link_header_parts.length > 0) {
-		link_headers[artifact.project_path] = link_header_parts.join(', ');
+	if (isHeaderRoot(artifact)) {
+		const link_header_parts: string[] = [];
+
+		for (const dependencyArtifact of collectHeaderDependencies(artifact)) {
+			switch (dependencyArtifact.ext) {
+				case 'js':
+					link_header_parts.push(
+						`</${encodeURI(dependencyArtifact.project_path)}>; rel=modulepreload`,
+					);
+					break;
+				case 'css':
+					link_header_parts.push(
+						`</${encodeURI(dependencyArtifact.project_path)}>; rel=preload; as=style`,
+					);
+					break;
+				// no default
+			}
+		}
+
+		if (link_header_parts.length > 0) {
+			link_headers[artifact.project_path] = link_header_parts.join(', ');
+		}
 	}
 
 	await Promise.all(promises);
@@ -389,4 +404,38 @@ export async function flush(): Promise<void> {
 		// oxlint-disable-next-line no-console
 		console.table(flushed_table);
 	}
+}
+
+/** Returns whether an artifact is HTML or a dynamic import target eligible for a Link header. */
+function isHeaderRoot(artifact: Artifact): boolean {
+	if (artifact.ext === 'html') {
+		return true;
+	}
+
+	for (const parent of dependents.get(artifact) ?? []) {
+		if (!parent.import_tree_dependencies.has(artifact)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Collects transitive dependencies through direct import-tree links, stopping at dynamic imports.
+ * Excludes the root and duplicates, and handles cyclic imports without recursion.
+ */
+function collectHeaderDependencies(root: Artifact): Set<Artifact> {
+	const result = new Set<Artifact>([root]);
+
+	for (const artifact of result) {
+		for (const dependency of artifact.dependencies) {
+			if (artifact.import_tree_dependencies.has(dependency)) {
+				result.add(dependency);
+			}
+		}
+	}
+
+	result.delete(root);
+	return result;
 }

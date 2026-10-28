@@ -126,7 +126,10 @@ async function computeReplacementScript(
 		script_contents = await dependencyArtifact.text();
 
 		for (const artifact_ of dependencyArtifact.dependencies) {
-			artifact.link(artifact_);
+			artifact.link(
+				artifact_,
+				dependencyArtifact.import_tree_dependencies.has(artifact_),
+			);
 		}
 
 		artifact.unlink(dependencyArtifact);

@@ -26,7 +26,15 @@ const staticServer = serveStatic({
 	precompressed: true,
 	onFound(path, c) {
 		if (path.startsWith(STATIC_DIR)) {
-			const static_path = path.slice(STATIC_DIR.length + 1);
+			let static_path = path.slice(STATIC_DIR.length + 1);
+
+			if (
+				c.res.headers.get('Content-Encoding') === 'gzip'
+				&& static_path.endsWith('.gz')
+			) {
+				static_path = static_path.slice(0, -3);
+			}
+
 			const link_header = LINK_HEADERS[static_path];
 			if (link_header !== undefined) {
 				c.header('Link', link_header);
@@ -44,7 +52,7 @@ const staticServer = serveStatic({
  */
 // oxlint-disable-next-line no-unused-vars
 function serveFile(path) {
-	return (c) => app.fetch(new Request(new URL(path, c.req.url)));
+	return (c) => app.fetch(new Request(new URL(path, c.req.url), c.req.raw));
 }
 
 const app = new Hono();

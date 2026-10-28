@@ -248,16 +248,19 @@ export async function bundle(): Promise<void> {
 	for (const [project_path, { imports }] of metafile) {
 		const artifact = new Artifact(project_path);
 
-		for (const imported_project_path of imports) {
+		for (const { path: imported_project_path, is_direct } of imports) {
 			const importedArtifact = new Artifact(imported_project_path);
-			artifact.link(importedArtifact);
+			artifact.link(importedArtifact, is_direct);
 		}
 	}
 }
 
 type BundleOutputMetadata = {
 	project_path?: string;
-	imports: string[];
+	imports: {
+		path: string;
+		is_direct: boolean;
+	}[];
 };
 
 /** Processes the esbuild metafile. */
@@ -317,7 +320,10 @@ function processMetafile(
 						);
 					}
 
-					return import_.path.slice(output_prefix.length);
+					return {
+						path: import_.path.slice(output_prefix.length),
+						is_direct: import_.kind !== 'dynamic-import',
+					};
 				}),
 		});
 	}
